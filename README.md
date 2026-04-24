@@ -25,14 +25,14 @@ uv run ruff check .              # lint
 
 Heroku, separate pipeline (review apps / staging / prod) from the ps-rails app.
 
-Heroku's Python buildpack installs from `requirements.txt`. To update deps:
+Heroku's Python buildpack detects `uv.lock` and runs `uv sync --locked --no-dev` during the build — no `requirements.txt` is needed and shipping one alongside `uv.lock` triggers a "multiple package managers detected" build failure. To update deps:
 
 ```bash
-uv add <package>
-uv export --no-hashes --format requirements-txt > requirements.txt
+uv add <package>        # or `uv add --dev <package>` for test-only deps
+git add pyproject.toml uv.lock
 ```
 
-The `Procfile` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+`.python-version` pins the Python version. The `Procfile` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT` against the venv the buildpack activates.
 
 ## License
 
