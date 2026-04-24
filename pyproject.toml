@@ -1,0 +1,35 @@
+[project]
+name = "ps-phx-parser"
+version = "0.1.0"
+description = "HTTP service that extracts structured data from PHPP workbooks using the PHX library's bundled field mappings."
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.13,<3.14"
+authors = [{ name = "PassivSure" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "openpyxl>=3.1.5",
+    "PHX>=1.56.51",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
