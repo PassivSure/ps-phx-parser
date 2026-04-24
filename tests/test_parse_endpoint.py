@@ -73,6 +73,5 @@ def test_parse_missing_url_returns_422():
     assert response.status_code == 422
 
 
-def test_parse_missing_version_returns_422():
-    response = client.post("/parse", json={"url": WORKBOOK_URL})
-    assert response.status_code == 422
+# Note: phpp_version is optional — auto-detection is covered by
+# tests/test_detect_endpoint.py::test_parse_auto_detects_when_phpp_version_omitted

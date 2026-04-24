@@ -2,7 +2,7 @@
 
 **Linear:** [PAS-57](https://linear.app/passivsure/issue/PAS-57)
 **Date:** 2026-04-24
-**Status:** Recommendation ready.
+**Status:** Implemented. Production code lives in `app/version_detection.py` and is wired into `POST /detect-version` and `POST /parse` (auto-detects when `phpp_version` is omitted). The prototype that was at `spikes/version_detection.py` has been deleted.
 
 ## Summary
 
