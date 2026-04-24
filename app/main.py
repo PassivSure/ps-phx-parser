@@ -1,15 +1,26 @@
 """ps-phx-parser FastAPI entry point."""
 
+from contextlib import asynccontextmanager
+
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 
+from app.auth import log_startup_auth_state, require_auth
 from app.parser import ParseError, available_versions, parse_workbook
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    log_startup_auth_state()
+    yield
+
 
 app = FastAPI(
     title="ps-phx-parser",
     description="Headless PHPP reader using PHX field mappings + openpyxl.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 FETCH_TIMEOUT_SECONDS = 30.0
@@ -36,7 +47,7 @@ async def versions() -> dict[str, list[str]]:
     return {"versions": available_versions()}
 
 
-@app.post("/parse", response_model=ParseResponse)
+@app.post("/parse", response_model=ParseResponse, dependencies=[Depends(require_auth)])
 async def parse(req: ParseRequest) -> ParseResponse:
     async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS) as client:
         try:

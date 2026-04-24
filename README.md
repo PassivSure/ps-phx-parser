@@ -34,6 +34,15 @@ git add pyproject.toml uv.lock
 
 `.python-version` pins the Python version. The `Procfile` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT` against the venv the buildpack activates.
 
+### Configuration
+
+| Env var | Required | Purpose |
+|---|---|---|
+| `PHX_PARSER_AUTH_TOKEN` | yes (in prod) | Shared secret. `/parse` requires `Authorization: Bearer <token>`. Must match `PHX_PARSER_AUTH_TOKEN` on the ps-rails side. Generate with `openssl rand -hex 32`. If unset, auth is disabled (a startup warning is logged) — fine for tests/CI, **unsafe for any publicly reachable host**. |
+| `PORT` | (auto) | Heroku injects. |
+
+`/health` and `/versions` are always open (Heroku's router needs `/health`).
+
 ## License
 
 GPL-3.0-or-later. This project imports [PHX](https://github.com/PH-Tools/PHX) (GPL-3.0-or-later) at runtime, so the service is itself GPL. The HTTP boundary between ps-rails and this service keeps ps-rails proprietary — legal review gate on PAS-63 before production cutover.
