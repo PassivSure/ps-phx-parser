@@ -121,6 +121,27 @@ class Envelope(BaseModel):
     airtightness: Airtightness
 
 
+class Organization(BaseModel):
+    label: str
+    name: str
+
+
+class ProjectInfo(BaseModel):
+    """Project metadata. P2.5 emits everything except ``verification_complete``,
+    which currently hard-codes False (it needs a heuristic over Verification's
+    certifier-filled cells — filed as a follow-up). The Mapper-side merge
+    rule (verification KPIs supersede model KPIs when ``verification_complete``)
+    therefore behaves as if the project is design-stage until the heuristic
+    lands."""
+
+    project_name: str | None = None
+    postal_code: str | None = None
+    location_string: str | None = None
+    occupancy_type: str | None = None
+    verification_complete: bool
+    organizations: list[Organization]
+
+
 class ParseResponse(BaseModel):
     """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
     coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
@@ -133,6 +154,7 @@ class ParseResponse(BaseModel):
     parser: ParserMeta
     kpis: Kpis | None = None
     envelope: Envelope | None = None
+    project_info: ProjectInfo | None = None
 
 
 class DetectVersionRequest(BaseModel):
@@ -222,4 +244,5 @@ async def parse(req: ParseRequest) -> ParseResponse:
         ),
         kpis=result.get("kpis"),
         envelope=result.get("envelope"),
+        project_info=result.get("project_info"),
     )
