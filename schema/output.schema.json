@@ -80,7 +80,7 @@
           "additionalProperties": false,
           "properties": {
             "n50_ach": { "type": ["number", "null"] },
-            "source": { "type": "string" }
+            "source": { "type": ["string", "null"] }
           }
         }
       }
@@ -94,7 +94,7 @@
           "additionalProperties": false,
           "properties": {
             "hrv_efficiency_pct": { "type": ["number", "null"] },
-            "source": { "type": "string" }
+            "source": { "type": ["string", "null"] }
           }
         }
       }
@@ -149,8 +149,8 @@
         "value": { "type": ["number", "null"] },
         "unit": { "type": "string" },
         "source": {
-          "type": "string",
-          "description": "Sheet name and cell reference, e.g. 'Verification!I35'."
+          "type": ["string", "null"],
+          "description": "Sheet name and cell reference, e.g. 'Verification!I35'. Null when the parser could not locate the source (e.g. sheet missing)."
         }
       }
     },
@@ -162,7 +162,7 @@
         "unit": { "type": "string", "enum": ["Btu/h", "W", "kW"] },
         "value_per_area": { "type": ["number", "null"] },
         "unit_per_area": { "type": "string", "enum": ["Btu/hft2", "W/m2", "W/ft2", "kW/ft2"] },
-        "source": { "type": "string" }
+        "source": { "type": ["string", "null"] }
       }
     },
     "envelope_component": {
@@ -213,7 +213,7 @@
         "airflow_cfm": { "type": ["number", "null"] },
         "airflow_m3h": { "type": ["number", "null"] },
         "heat_recovery_efficiency_pct": { "type": ["number", "null"] },
-        "source": { "type": "string" }
+        "source": { "type": ["string", "null"] }
       }
     }
   }
