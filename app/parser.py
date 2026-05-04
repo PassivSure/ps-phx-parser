@@ -17,6 +17,7 @@ from typing import Any
 from openpyxl import load_workbook
 from PHX.PHPP.phpp_localization import shape_model
 
+from app.envelope import read_envelope
 from app.kpis import read_kpis
 
 SHAPES_DIR = pathlib.Path(shape_model.__file__).parent
@@ -54,6 +55,9 @@ def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
     shape = load_shape(version)
     wb = load_workbook(BytesIO(workbook_bytes), data_only=True, read_only=True)
     try:
-        return {"kpis": read_kpis(wb, shape)}
+        return {
+            "kpis": read_kpis(wb, shape),
+            "envelope": read_envelope(wb, shape),
+        }
     finally:
         wb.close()
