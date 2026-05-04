@@ -1,6 +1,11 @@
 """ps-phx-parser FastAPI entry point."""
 
+import pathlib
+import tomllib
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from importlib.metadata import version as package_version
+from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -9,6 +14,20 @@ from pydantic import BaseModel, HttpUrl
 from app.auth import log_startup_auth_state, require_auth
 from app.parser import ParseError, available_versions, parse_workbook
 from app.version_detection import DetectionError, detect_version
+
+SCHEMA_VERSION = "1.0.0"
+PARSER_NAME = "ps-phx-parser"
+
+
+def _read_parser_pkg_version() -> str:
+    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with pyproject.open("rb") as f:
+        return tomllib.load(f)["project"]["version"]
+
+
+# e.g. "ps-phx-parser/0.1.0+PHX-1.56.51" — lets the consumer correlate
+# parser regressions to a release.
+PARSER_VERSION = f"{PARSER_NAME}/{_read_parser_pkg_version()}+PHX-{package_version('PHX')}"
 
 
 @asynccontextmanager
@@ -33,9 +52,23 @@ class ParseRequest(BaseModel):
     phpp_version: str | None = None
 
 
-class ParseResponse(BaseModel):
+class ParserMeta(BaseModel):
+    name: Literal["ps-phx-parser"] = PARSER_NAME
+    version: str
     phpp_version: str
-    num_of_units: int | float | str | None
+    parsed_at: str
+    file_hash_sha256: str | None = None
+
+
+class ParseResponse(BaseModel):
+    """v1.0.0 envelope. Phase 2 will populate kpis/envelope/hvac_equipment/etc.
+
+    Schema: schema/output.schema.json. Bump SCHEMA_VERSION when the contract
+    breaks; the Ruby Mapper must update in lockstep.
+    """
+
+    schema_version: Literal["1.0.0"] = SCHEMA_VERSION
+    parser: ParserMeta
 
 
 class DetectVersionRequest(BaseModel):
@@ -113,8 +146,17 @@ async def parse(req: ParseRequest) -> ParseResponse:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        result = parse_workbook(body, version)
+        # parse_workbook still returns the MVP placeholder fields; Phase 2
+        # tickets (P2.2+) will expand it. The endpoint contract is the v1
+        # envelope below — placeholder fields are dropped from the response.
+        parse_workbook(body, version)
     except ParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return ParseResponse(**result)
+    return ParseResponse(
+        parser=ParserMeta(
+            version=PARSER_VERSION,
+            phpp_version=version,
+            parsed_at=datetime.now(UTC).isoformat(),
+        ),
+    )
