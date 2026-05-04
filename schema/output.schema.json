@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PassivSure/ps-phx-parser/schema/output.schema.json",
+  "title": "ps-phx-parser /parse response",
+  "description": "Versioned contract for the JSON returned by POST /parse. v1 is additive: top-level subtrees (kpis, envelope, hvac_equipment, project_info, etc.) are optional and emitted as parser modules ship in PAS-62 (P2.2 KPIs, P2.3 envelope, P2.4 HVAC, P2.5 project_info). Object shapes are closed (additionalProperties: false) to catch parser-side drift — adding a new field to an existing subtree requires a schema update in the same PR. Tighten requireds in 1.x once full coverage lands.",
+  "type": "object",
+  "required": ["schema_version", "parser"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Bump when the contract changes in a backwards-incompatible way. Ruby Mapper must be updated in lockstep on bump."
+    },
+    "parser": {
+      "type": "object",
+      "required": ["name", "version", "phpp_version", "parsed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "const": "ps-phx-parser" },
+        "version": {
+          "type": "string",
+          "description": "Combined parser + PHX library version, e.g. 'ps-phx-parser/0.1.0+PHX-1.56.51'. Lets the consumer correlate parser regressions to a release."
+        },
+        "phpp_version": {
+          "type": "string",
+          "description": "PHX shape stem used to read the workbook (e.g. 'EN_10_6IP')."
+        },
+        "parsed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 UTC timestamp when the parse completed."
+        },
+        "file_hash_sha256": { "type": ["string", "null"] }
+      }
+    },
+    "units": {
+      "type": "object",
+      "description": "Native unit system from the workbook. The Ruby Mapper coerces each value into the canonical app unit.",
+      "additionalProperties": false,
+      "properties": {
+        "system": { "type": "string", "enum": ["SI", "IP", "MIXED"] },
+        "energy": { "type": "string" },
+        "area": { "type": "string" },
+        "power": { "type": "string" },
+        "heat_flow": { "type": "string" },
+        "temperature": { "type": "string" }
+      }
+    },
+    "kpis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tfa": { "$ref": "#/$defs/measurement" },
+        "heating_demand": { "$ref": "#/$defs/measurement" },
+        "cooling_demand": { "$ref": "#/$defs/measurement" },
+        "site_eui": { "$ref": "#/$defs/measurement" },
+        "source_eui": { "$ref": "#/$defs/measurement" },
+        "pe_demand": { "$ref": "#/$defs/measurement" },
+        "peak_loads": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "heating": { "$ref": "#/$defs/peak_load" },
+            "cooling": { "$ref": "#/$defs/peak_load" }
+          }
+        }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envelope_component" }
+        },
+        "airtightness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "n50_ach": { "type": ["number", "null"] },
+            "source": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "ventilation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hrv_efficiency_pct": { "type": ["number", "null"] },
+            "source": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "hvac_equipment": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hvac_equipment_item" }
+    },
+    "project_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_name": { "type": ["string", "null"] },
+        "postal_code": { "type": ["string", "null"] },
+        "location_string": { "type": ["string", "null"] },
+        "verification_complete": { "type": "boolean" },
+        "occupancy_type": { "type": ["string", "null"] },
+        "organizations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "name"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "description": "Non-fatal field-level read failures the parser hit. The endpoint still returns 200 if the workbook itself was readable.",
+      "items": {
+        "type": "object",
+        "required": ["field", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "field": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "measurement": {
+      "type": "object",
+      "required": ["value", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "unit": { "type": "string" },
+        "source": {
+          "type": ["string", "null"],
+          "description": "Sheet name and cell reference, e.g. 'Verification!I35'. Null when the parser could not locate the source (e.g. sheet missing)."
+        }
+      }
+    },
+    "peak_load": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "unit": { "type": "string", "enum": ["Btu/h", "W", "kW"] },
+        "value_per_area": { "type": ["number", "null"] },
+        "unit_per_area": { "type": "string", "enum": ["Btu/hft2", "W/m2", "W/ft2", "kW/ft2"] },
+        "source": { "type": ["string", "null"] }
+      }
+    },
+    "envelope_component": {
+      "type": "object",
+      "required": ["component", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": ["wall", "roof", "slab_on_grade", "window", "door", "thermal_bridge"]
+        },
+        "label": { "type": "string" },
+        "area_ft2": { "type": ["number", "null"] },
+        "total_thickness_in": { "type": ["number", "null"] },
+        "total_thickness_mm": { "type": ["number", "null"] },
+        "length_ft": {
+          "type": ["number", "null"],
+          "description": "For thermal bridges only."
+        },
+        "u_value_Btuh_ft2F": { "type": ["number", "null"] },
+        "r_value_hr_ft2F_Btu": { "type": ["number", "null"] },
+        "psi_value_Btuh_ftF": {
+          "type": ["number", "null"],
+          "description": "For thermal bridges only."
+        },
+        "source_area": { "type": "string" },
+        "source_u_value": { "type": "string" }
+      }
+    },
+    "hvac_equipment_item": {
+      "type": "object",
+      "required": ["equipment_type"],
+      "additionalProperties": false,
+      "properties": {
+        "equipment_type": {
+          "type": "string",
+          "enum": ["cooling_unit", "hrv", "erv", "heat_pump", "boiler", "dhw", "dhw_heat_pump", "compact"]
+        },
+        "name": { "type": ["string", "null"] },
+        "manufacturer": { "type": ["string", "null"] },
+        "capacity": { "type": ["number", "null"] },
+        "capacity_unit": {
+          "type": ["string", "null"],
+          "enum": ["Btu/h", "W", "kW", "ton", null]
+        },
+        "efficiency_value": { "type": ["number", "null"] },
+        "efficiency_type": { "type": ["string", "null"] },
+        "airflow_cfm": { "type": ["number", "null"] },
+        "airflow_m3h": { "type": ["number", "null"] },
+        "heat_recovery_efficiency_pct": { "type": ["number", "null"] },
+        "source": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

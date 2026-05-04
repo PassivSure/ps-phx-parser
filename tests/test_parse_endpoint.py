@@ -26,7 +26,13 @@ def test_parse_success(workbook_bytes):
         "/parse", json={"url": WORKBOOK_URL, "phpp_version": "EN_10_6IP"}
     )
     assert response.status_code == 200
-    assert response.json() == {"phpp_version": "EN_10_6IP", "num_of_units": 42}
+    body = response.json()
+    assert body["schema_version"] == "1.0.0"
+    assert body["parser"]["name"] == "ps-phx-parser"
+    assert body["parser"]["phpp_version"] == "EN_10_6IP"
+    assert body["parser"]["version"].startswith("ps-phx-parser/")
+    assert "+PHX-" in body["parser"]["version"]
+    assert body["parser"]["parsed_at"]
 
 
 @respx.mock
