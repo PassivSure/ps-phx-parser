@@ -47,16 +47,17 @@ def test_parse_response_validates_against_schema(workbook_bytes_with_version, sc
 
 
 @respx.mock
-def test_parse_response_with_kpis_and_envelope_validates(shape_en_10_6ip, schema):
-    """Live /parse against a fixture that exercises kpis + envelope subtrees
-    populated. Catches schema drift introduced by P2.2/P2.3 — would have
-    flagged the source/null mismatch we hit during P2.2."""
+def test_parse_response_with_all_subtrees_validates(shape_en_10_6ip, schema):
+    """Live /parse against a fixture exercising kpis + envelope + project_info.
+    Catches schema drift introduced by any P2.x ticket — would have flagged
+    the source/null mismatch we hit during P2.2."""
     from tests.conftest import build_workbook_bytes
 
     body = build_workbook_bytes(
         shape_en_10_6ip,
         with_kpis=True,
         with_envelope=True,
+        with_project_info=True,
         data_sheet_version="10.6 IP",
     )
     respx.get(WORKBOOK_URL).mock(return_value=httpx.Response(200, content=body))
@@ -68,6 +69,9 @@ def test_parse_response_with_kpis_and_envelope_validates(shape_en_10_6ip, schema
     assert body["kpis"]["tfa"]["value"] == 2400.0
     assert len(body["envelope"]["components"]) > 0
     assert body["envelope"]["airtightness"]["n50_ach"] == 0.6
+    assert body["project_info"]["project_name"] == "Test Passive House"
+    assert body["project_info"]["postal_code"] == "94028"
+    assert len(body["project_info"]["organizations"]) == 5
 
     validate(instance=body, schema=schema)
 

@@ -19,6 +19,7 @@ from PHX.PHPP.phpp_localization import shape_model
 
 from app.envelope import read_envelope
 from app.kpis import read_kpis
+from app.project_info import read_project_info
 
 SHAPES_DIR = pathlib.Path(shape_model.__file__).parent
 
@@ -58,6 +59,7 @@ def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
         return {
             "kpis": read_kpis(wb, shape),
             "envelope": read_envelope(wb, shape),
+            "project_info": read_project_info(wb, shape),
         }
     finally:
         wb.close()

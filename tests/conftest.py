@@ -37,6 +37,7 @@ def build_workbook_bytes(
     with_kpis: bool = False,
     cooling_peak_value: float | None = None,
     with_envelope: bool = False,
+    with_project_info: bool = False,
 ) -> bytes:
     """Build a minimal in-memory PHPP-shaped workbook for tests.
 
@@ -165,6 +166,41 @@ def build_workbook_bytes(
         )
         v_ws[f"{vent.airtightness_n50.input_column}{n50_row}"] = 0.6
 
+    if with_project_info:
+        # Overview sheet: project name, organizations
+        ov = shape.OVERVIEW
+        ov_ws = wb.create_sheet(ov.name)
+        ov_ws[ov.basic_data.address_project_name] = "Test Passive House"
+        # Organizations live at pinned rows in Overview cols B + C
+        org_rows = {
+            31: ("Home owner name / E-mail", "Acme Owners LLC"),
+            33: ("Architect name / E-mail", "Smith Architects"),
+            34: ("Mechanical engineer name / E-mail", "Cool MEP Inc"),
+            35: ("Energy consultant name / E-mail", "EnergyPro"),
+            48: ("Certification body Name / E-mail", "PHIUS"),
+        }
+        for row, (label, name) in org_rows.items():
+            ov_ws[f"B{row}"] = label
+            ov_ws[f"C{row}"] = name
+
+        # Verification sheet: address fields + occupancy via PHX shape
+        vf_ws = wb["Verification"] if "Verification" in wb.sheetnames else wb.create_sheet(
+            shape.VERIFICATION.name
+        )
+        vf_ws["K6"] = "100 Main St"
+        vf_ws["K7"] = '"94028"'  # PHPP wraps zips in literal quotes
+        vf_ws["L7"] = "Sunnyvale"
+        vf_ws["K8"] = "CA"
+
+        # phi_building_use_type via locator pattern
+        use_type = shape.VERIFICATION.phi_building_use_type
+        # Pick a row not already used by num_of_units (which uses row 30)
+        use_locator_row = 50
+        vf_ws[f"{use_type.locator_col}{use_locator_row}"] = use_type.locator_string
+        vf_ws[
+            f"{use_type.input_column}{use_locator_row + use_type.input_row_offset}"
+        ] = "10-Residential building: Residential"
+
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -192,3 +228,8 @@ def workbook_bytes_with_kpis(shape_en_10_6ip) -> bytes:
 @pytest.fixture
 def workbook_bytes_with_envelope(shape_en_10_6ip) -> bytes:
     return build_workbook_bytes(shape_en_10_6ip, with_envelope=True)
+
+
+@pytest.fixture
+def workbook_bytes_with_project_info(shape_en_10_6ip) -> bytes:
+    return build_workbook_bytes(shape_en_10_6ip, with_project_info=True)
