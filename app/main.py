@@ -60,8 +60,47 @@ class ParserMeta(BaseModel):
     file_hash_sha256: str | None = None
 
 
+class Measurement(BaseModel):
+    """Pydantic model mirrors what the parser actually emits today. The
+    schema (output.schema.json) is the broader contract — fields like
+    `source` may be absent or null. As later P2.x tickets emit more
+    fields, expand this model in lockstep."""
+
+    value: float | None
+    unit: str
+    source: str | None = None
+
+
+class PeakLoad(BaseModel):
+    """value_per_area / unit_per_area aren't emitted yet — P2.2 reads only
+    the total peak load. They'll be added when we wire TFA-aware divisors."""
+
+    value: float | None
+    unit: str
+    source: str | None = None
+
+
+class PeakLoads(BaseModel):
+    heating: PeakLoad
+    cooling: PeakLoad
+
+
+class Kpis(BaseModel):
+    """KPI subtree. P2.2 fills tfa/heating_demand/cooling_demand/peak_loads/
+    source_eui/pe_demand. site_eui is deferred (range-scan across PER end-uses)
+    and will be added to this model when its follow-up ticket lands."""
+
+    tfa: Measurement
+    heating_demand: Measurement
+    cooling_demand: Measurement
+    source_eui: Measurement
+    pe_demand: Measurement
+    peak_loads: PeakLoads
+
+
 class ParseResponse(BaseModel):
-    """v1.0.0 envelope. Phase 2 will populate kpis/envelope/hvac_equipment/etc.
+    """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
+    coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
 
     Schema: schema/output.schema.json. Bump SCHEMA_VERSION when the contract
     breaks; the Ruby Mapper must update in lockstep.
@@ -69,6 +108,7 @@ class ParseResponse(BaseModel):
 
     schema_version: Literal["1.0.0"] = SCHEMA_VERSION
     parser: ParserMeta
+    kpis: Kpis | None = None
 
 
 class DetectVersionRequest(BaseModel):
@@ -146,10 +186,7 @@ async def parse(req: ParseRequest) -> ParseResponse:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        # parse_workbook still returns the MVP placeholder fields; Phase 2
-        # tickets (P2.2+) will expand it. The endpoint contract is the v1
-        # envelope below — placeholder fields are dropped from the response.
-        parse_workbook(body, version)
+        result = parse_workbook(body, version)
     except ParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -159,4 +196,5 @@ async def parse(req: ParseRequest) -> ParseResponse:
             phpp_version=version,
             parsed_at=datetime.now(UTC).isoformat(),
         ),
+        kpis=result.get("kpis"),
     )
