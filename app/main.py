@@ -1,6 +1,11 @@
 """ps-phx-parser FastAPI entry point."""
 
+import pathlib
+import tomllib
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from importlib.metadata import version as package_version
+from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -9,6 +14,20 @@ from pydantic import BaseModel, HttpUrl
 from app.auth import log_startup_auth_state, require_auth
 from app.parser import ParseError, available_versions, parse_workbook
 from app.version_detection import DetectionError, detect_version
+
+SCHEMA_VERSION = "1.0.0"
+PARSER_NAME = "ps-phx-parser"
+
+
+def _read_parser_pkg_version() -> str:
+    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with pyproject.open("rb") as f:
+        return tomllib.load(f)["project"]["version"]
+
+
+# e.g. "ps-phx-parser/0.1.0+PHX-1.56.51" — lets the consumer correlate
+# parser regressions to a release.
+PARSER_VERSION = f"{PARSER_NAME}/{_read_parser_pkg_version()}+PHX-{package_version('PHX')}"
 
 
 @asynccontextmanager
@@ -33,9 +52,63 @@ class ParseRequest(BaseModel):
     phpp_version: str | None = None
 
 
-class ParseResponse(BaseModel):
+class ParserMeta(BaseModel):
+    name: Literal["ps-phx-parser"] = PARSER_NAME
+    version: str
     phpp_version: str
-    num_of_units: int | float | str | None
+    parsed_at: str
+    file_hash_sha256: str | None = None
+
+
+class Measurement(BaseModel):
+    """Pydantic model mirrors what the parser actually emits today. The
+    schema (output.schema.json) is the broader contract — fields like
+    `source` may be absent or null. As later P2.x tickets emit more
+    fields, expand this model in lockstep."""
+
+    value: float | None
+    unit: str
+    source: str | None = None
+
+
+class PeakLoad(BaseModel):
+    """value_per_area / unit_per_area aren't emitted yet — P2.2 reads only
+    the total peak load. They'll be added when we wire TFA-aware divisors."""
+
+    value: float | None
+    unit: str
+    source: str | None = None
+
+
+class PeakLoads(BaseModel):
+    heating: PeakLoad
+    cooling: PeakLoad
+
+
+class Kpis(BaseModel):
+    """KPI subtree. P2.2 fills tfa/heating_demand/cooling_demand/peak_loads/
+    source_eui/pe_demand. site_eui is deferred (range-scan across PER end-uses)
+    and will be added to this model when its follow-up ticket lands."""
+
+    tfa: Measurement
+    heating_demand: Measurement
+    cooling_demand: Measurement
+    source_eui: Measurement
+    pe_demand: Measurement
+    peak_loads: PeakLoads
+
+
+class ParseResponse(BaseModel):
+    """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
+    coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
+
+    Schema: schema/output.schema.json. Bump SCHEMA_VERSION when the contract
+    breaks; the Ruby Mapper must update in lockstep.
+    """
+
+    schema_version: Literal["1.0.0"] = SCHEMA_VERSION
+    parser: ParserMeta
+    kpis: Kpis | None = None
 
 
 class DetectVersionRequest(BaseModel):
@@ -117,4 +190,11 @@ async def parse(req: ParseRequest) -> ParseResponse:
     except ParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return ParseResponse(**result)
+    return ParseResponse(
+        parser=ParserMeta(
+            version=PARSER_VERSION,
+            phpp_version=version,
+            parsed_at=datetime.now(UTC).isoformat(),
+        ),
+        kpis=result.get("kpis"),
+    )

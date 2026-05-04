@@ -56,7 +56,7 @@ def test_parse_auto_detects_when_phpp_version_omitted(workbook_bytes_with_versio
     response = client.post("/parse", json={"url": WORKBOOK_URL})  # no phpp_version
 
     assert response.status_code == 200
-    assert response.json() == {"phpp_version": "EN_10_6IP", "num_of_units": 42}
+    assert response.json()["parser"]["phpp_version"] == "EN_10_6IP"
 
 
 @respx.mock
@@ -85,4 +85,4 @@ def test_parse_explicit_version_overrides_detection(workbook_bytes_with_version)
     )
 
     assert response.status_code == 200
-    assert response.json()["phpp_version"] == "EN_10_6"
+    assert response.json()["parser"]["phpp_version"] == "EN_10_6"

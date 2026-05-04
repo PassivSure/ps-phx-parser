@@ -3,19 +3,21 @@
 Uses only `PHX.PHPP.phpp_localization.shape_model` (pydantic) and openpyxl.
 Never instantiates `PHPPConnection` or touches xlwings.
 
-MVP reads a single field: `VERIFICATION.num_of_units`. PAS-62 expands coverage.
+P2.2 adds the `kpis` subtree (see app.kpis). Subsequent P2.x tickets add
+envelope, hvac_equipment, project_info.
 """
 
 from __future__ import annotations
 
 import pathlib
 from functools import lru_cache
+from io import BytesIO
 from typing import Any
 
 from openpyxl import load_workbook
-from openpyxl.utils import column_index_from_string
-from openpyxl.worksheet.worksheet import Worksheet
 from PHX.PHPP.phpp_localization import shape_model
+
+from app.kpis import read_kpis
 
 SHAPES_DIR = pathlib.Path(shape_model.__file__).parent
 
@@ -40,60 +42,18 @@ def load_shape(version: str) -> shape_model.PhppShape:
     return shape_model.PhppShape.model_validate_json(path.read_bytes())
 
 
-def _find_locator_row(
-    ws: Worksheet, locator_col: str, locator_string: str
-) -> int | None:
-    col_idx = column_index_from_string(locator_col)
-    needle = locator_string.strip().lower()
-    for row in range(1, ws.max_row + 1):
-        val = ws.cell(row=row, column=col_idx).value
-        if val is None:
-            continue
-        if str(val).strip().lower() == needle:
-            return row
-    return None
-
-
-def _read_field(ws: Worksheet, item: shape_model.VerificationInputItem) -> Any:
-    row = _find_locator_row(ws, item.locator_col, item.locator_string)
-    if row is None:
-        return None
-    target_row = row + item.input_row_offset
-    target_col = column_index_from_string(item.input_column)
-    return ws.cell(row=target_row, column=target_col).value
-
-
-def _sheet_by_name(wb, target_name: str) -> Worksheet:
-    needle = target_name.strip().lower()
-    for name in wb.sheetnames:
-        if name.strip().lower() == needle:
-            return wb[name]
-    raise ParseError(
-        f"Sheet {target_name!r} not found in workbook. "
-        f"Available: {wb.sheetnames[:10]}"
-    )
-
-
 def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
-    """Read a PHPP workbook's bytes and extract the MVP field set.
+    """Read a PHPP workbook's bytes and extract the v1.0.0 subtrees we cover.
 
-    Returns a dict shaped like:
-        {"phpp_version": "EN_10_6IP", "num_of_units": 1}
+    Currently emits ``kpis`` (P2.2). The endpoint wraps this in the
+    schema-versioned envelope and adds the ``parser`` block.
 
-    Raises ParseError on unknown version or missing target sheet.
+    Raises ``ParseError`` on unknown version. Per-field read failures bubble
+    up as ``None`` values within their subtree.
     """
     shape = load_shape(version)
-
-    from io import BytesIO
-
     wb = load_workbook(BytesIO(workbook_bytes), data_only=True, read_only=True)
     try:
-        verification_ws = _sheet_by_name(wb, shape.VERIFICATION.name)
-        num_of_units = _read_field(verification_ws, shape.VERIFICATION.num_of_units)
+        return {"kpis": read_kpis(wb, shape)}
     finally:
         wb.close()
-
-    return {
-        "phpp_version": version,
-        "num_of_units": num_of_units,
-    }

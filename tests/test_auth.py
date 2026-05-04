@@ -74,7 +74,7 @@ def test_parse_accepts_correct_bearer_token(auth_enabled, workbook_bytes):
         json={"url": WORKBOOK_URL, "phpp_version": "EN_10_6IP"},
     )
     assert response.status_code == 200
-    assert response.json() == {"phpp_version": "EN_10_6IP", "num_of_units": 42}
+    assert response.json()["parser"]["phpp_version"] == "EN_10_6IP"
 
 
 @respx.mock
