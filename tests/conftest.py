@@ -36,6 +36,7 @@ def build_workbook_bytes(
     data_sheet_pe_factor: str | None = "1-PE-factors (non-renewable) PHI Certification",
     with_kpis: bool = False,
     cooling_peak_value: float | None = None,
+    with_envelope: bool = False,
 ) -> bytes:
     """Build a minimal in-memory PHPP-shaped workbook for tests.
 
@@ -116,6 +117,54 @@ def build_workbook_bytes(
         per_ws[f"{per.columns.per_energy}{total_row}"] = KPI_FIXTURE_VALUES["per_total_v"]
         per_ws[f"{per.columns.pe_energy}{total_row}"] = KPI_FIXTURE_VALUES["per_total_x"]
 
+    if with_envelope:
+        # Areas sheet: surface_rows + thermal_bridge_rows + airtightness via
+        # the same locator pattern the real workbook uses.
+        areas = shape.AREAS
+        a_ws = wb.create_sheet(areas.name)
+
+        # Surface header and entries
+        sr = areas.surface_rows
+        sr_header_col = sr.locator_col_header  # K
+        sr_header_row = 31
+        a_ws[f"{sr_header_col}{sr_header_row}"] = sr.locator_string_header
+        # Skip header label row at +1; real entries start at +2
+        sr_entries = [
+            # (group_raw, description, area)
+            ("8-External wall - ambient", "Wall_North", 200.0),
+            ("10-Roof / ceiling - ambient", "Roof_Main", 1500.0),
+            ("11-Floor slab / basement ceiling", "Slab_Ground", 1200.0),
+            ("7-Exterior door", "Front_Door", 21.0),
+            ("0-Projected building footprint", "Footprint_Aggregate", 9999.0),  # skipped
+            ("2-Fenster Nord", "Window_Placeholder", None),  # skipped
+        ]
+        for i, (group, desc, area) in enumerate(sr_entries):
+            r = sr_header_row + 2 + i
+            a_ws[f"{sr.inputs.group_number.column}{r}"] = group
+            a_ws[f"{sr.inputs.description.column}{r}"] = desc
+            if area is not None:
+                a_ws[f"{sr.inputs.area.column}{r}"] = area
+
+        # Thermal bridges
+        tb = areas.thermal_bridge_rows
+        tb_header_row = sr_header_row + 2 + len(sr_entries) + 5  # gap
+        a_ws[f"{tb.locator_col_header}{tb_header_row}"] = tb.locator_string_header
+        tb_entries = [("Slab edge", 110.0, 0.05), ("Window jamb", 65.0, 0.02)]
+        for i, (desc, length, psi) in enumerate(tb_entries):
+            r = tb_header_row + 2 + i
+            a_ws[f"{tb.inputs.description.column}{r}"] = desc
+            a_ws[f"{tb.inputs.length.column}{r}"] = length
+            a_ws[f"{tb.inputs.psi_value.column}{r}"] = psi
+
+        # Ventilation sheet — n50 via locator pattern
+        vent = shape.VENTILATION
+        v_ws = wb.create_sheet(vent.name)
+        n50_row = 23
+        v_ws[f"{vent.airtightness_n50.locator_col}{n50_row}"] = (
+            vent.airtightness_n50.locator_string
+        )
+        v_ws[f"{vent.airtightness_n50.input_column}{n50_row}"] = 0.6
+
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -138,3 +187,8 @@ def workbook_bytes_with_version(shape_en_10_6ip) -> bytes:
 @pytest.fixture
 def workbook_bytes_with_kpis(shape_en_10_6ip) -> bytes:
     return build_workbook_bytes(shape_en_10_6ip, with_kpis=True)
+
+
+@pytest.fixture
+def workbook_bytes_with_envelope(shape_en_10_6ip) -> bytes:
+    return build_workbook_bytes(shape_en_10_6ip, with_envelope=True)

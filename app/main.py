@@ -98,6 +98,29 @@ class Kpis(BaseModel):
     peak_loads: PeakLoads
 
 
+class EnvelopeComponent(BaseModel):
+    """One opaque surface (wall/roof/floor/door) or thermal bridge. P2.3
+    emits component/label/area_ft2 for opaques and label/length/psi for
+    thermal bridges. U/R-values come from the R-Values lookup in P2.3.b."""
+
+    component: str
+    label: str
+    area_ft2: float | None = None
+    length_ft: float | None = None
+    psi_value_Btuh_ftF: float | None = None
+    source_area: str | None = None
+
+
+class Airtightness(BaseModel):
+    n50_ach: float | None
+    source: str | None = None
+
+
+class Envelope(BaseModel):
+    components: list[EnvelopeComponent]
+    airtightness: Airtightness
+
+
 class ParseResponse(BaseModel):
     """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
     coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
@@ -109,6 +132,7 @@ class ParseResponse(BaseModel):
     schema_version: Literal["1.0.0"] = SCHEMA_VERSION
     parser: ParserMeta
     kpis: Kpis | None = None
+    envelope: Envelope | None = None
 
 
 class DetectVersionRequest(BaseModel):
@@ -197,4 +221,5 @@ async def parse(req: ParseRequest) -> ParseResponse:
             parsed_at=datetime.now(UTC).isoformat(),
         ),
         kpis=result.get("kpis"),
+        envelope=result.get("envelope"),
     )
