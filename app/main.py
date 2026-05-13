@@ -5,7 +5,7 @@ import tomllib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib.metadata import version as package_version
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -157,6 +157,14 @@ class ParseResponse(BaseModel):
     project_info: ProjectInfo | None = None
 
 
+class WufiParseRequest(BaseModel):
+    """Request for the /parse-wufi endpoint. WUFI Passive XML / .wpx files
+    don't carry a version stem in the PHPP sense — PHX.from_WUFI_XML picks
+    the right reader based on XML content."""
+
+    url: HttpUrl
+
+
 class DetectVersionRequest(BaseModel):
     url: HttpUrl
 
@@ -245,4 +253,44 @@ async def parse(req: ParseRequest) -> ParseResponse:
         kpis=result.get("kpis"),
         envelope=result.get("envelope"),
         project_info=result.get("project_info"),
+    )
+
+
+@app.post(
+    "/parse-wufi",
+    dependencies=[Depends(require_auth)],
+)
+async def parse_wufi(req: WufiParseRequest) -> dict[str, Any]:
+    """Parse a WUFI Passive XML / .wpx file via PHX.from_WUFI_XML.
+
+    STUB (2026-05-12): returns HTTP 501 until BldgTyp shares a real
+    sanitized WUFI Passive XML sample we can validate against. The
+    Rails-side WufiExtractJob is wired up and will see this 501 as a
+    clean failure (artifact marked failed, no Performance created).
+
+    Implementation path once we have a sample file:
+
+    1. body = await _fetch_workbook(str(req.url))
+    2. parsed_xml = PHX.from_WUFI_XML.read_wufi_xml_file.xml_to_dict(...)
+    3. phx_project = PHX.from_WUFI_XML.phx_converter.convert_xml_to_phx(...)
+    4. envelope = walk PhxProject -> v1.x schema envelope (kpis, envelope,
+       project_info, hvac_equipment, ventilation). The existing modules in
+       app.kpis / app.envelope / app.project_info are workbook-shaped;
+       we'll likely need parallel modules in app.wufi.* that walk PhxProject
+       directly instead of openpyxl cells.
+    5. Return the envelope alongside ParserMeta (set phpp_version to e.g.
+       "WUFI_PASSIVE" or extract from the model itself).
+
+    Open research questions to resolve with the sample file (and BldgTyp):
+    - Sign conventions (PHPP returns null on negative cooling; WUFI?)
+    - Verification flow — how is PHIUS-certifier-signed data represented?
+    - PHX object graph parity vs PHPP localization path
+    - Equipment hierarchy mapping (HP/Boiler/Compact + named ranges)
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "WUFI Passive parsing is not yet implemented. "
+            "Endpoint reserved; implementation pending a real sample file."
+        ),
     )
