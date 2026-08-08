@@ -7,6 +7,7 @@ from app.version_detection import (
     DetectedVersion,
     DetectionError,
     detect_version,
+    strip_easyph_edition_tag,
 )
 from tests.conftest import build_workbook_bytes
 
@@ -98,3 +99,55 @@ class TestDetectVersion:
 
         with pytest.raises(DetectionError, match="Unexpected version cell"):
             detect_version(buf.getvalue())
+
+
+class TestEasyPhEditionTag:
+    """easyPH tags the edition onto the version cell on 'Data'.
+
+    The tag names the EDITION, not a different shapefile: an easyPH workbook is
+    a standard PHPP plus an 'easyPH' input worksheet, so it uses its base
+    version's shape. PHX agrees — is_easyPh() detects the edition by looking for
+    the worksheet, never by reading this string.
+
+    Left in, the tag lands in `minor` and shape_stem yields
+    EN_10_6EASYPHV3IP, a shapefile that does not and should not exist.
+    """
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("10.6 easyPHv3", "10.6"),
+            ("10.6 easyPHv3 IP", "10.6 IP"),
+            ("10.6easyPHv3", "10.6"),
+            ("10.6 EASYPHV3", "10.6"),
+            ("10.6 easyPH", "10.6"),
+            # standard version cells are untouched
+            ("10.6", "10.6"),
+            ("10.6 IP", "10.6 IP"),
+            ("9.6a", "9.6a"),
+        ],
+    )
+    def test_strips_only_the_edition_tag(self, raw, expected):
+        assert strip_easyph_edition_tag(raw) == expected
+
+    def test_easyph_metric_resolves_to_its_base_shape(self, shape_en_10_6ip):
+        bytes_ = build_workbook_bytes(
+            shape_en_10_6ip, data_sheet_version="10.6 easyPHv3"
+        )
+
+        detected = detect_version(bytes_)
+
+        assert detected.shape_stem == "EN_10_6"
+        # raw keeps the original, so a caller can still tell it was easyPH
+        assert detected.raw == "10.6 easyPHv3"
+
+    def test_easyph_ip_keeps_its_unit_suffix(self, shape_en_10_6ip):
+        """The IP suffix IS part of the shape — only the edition tag goes."""
+        bytes_ = build_workbook_bytes(
+            shape_en_10_6ip, data_sheet_version="10.6 easyPHv3 IP"
+        )
+
+        detected = detect_version(bytes_)
+
+        assert detected.shape_stem == "EN_10_6IP"
+        assert detected.raw == "10.6 easyPHv3 IP"

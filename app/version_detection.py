@@ -7,6 +7,7 @@ spikes/version-detection.md for the writeup + empirical validation.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from io import BytesIO
 
@@ -14,6 +15,21 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 DATA_SHEET_NAMES = ("DATA", "DATEN", "DATOS")
+
+# easyPH workbooks append an edition tag to the version cell on 'Data':
+#
+#     standard PHPP   "10.6"           /  "10.6 IP"
+#     easyPH          "10.6 easyPHv3"  /  "10.6 easyPHv3 IP"
+#
+# The tag names the EDITION, not a different shapefile. An easyPH file is a
+# standard PHPP plus an 'easyPH' input worksheet — same sheets, same cell
+# geometry, same localization — so it uses its base version's shape. PHX itself
+# treats it that way: PHPPConnection.is_easyPh() detects the edition by looking
+# for the worksheet, never by reading this string.
+#
+# Left in, the tag lands in `minor` and shape_stem yields EN_10_6EASYPHV3IP —
+# a shapefile that does not and should not exist.
+EASYPH_EDITION_TAG = re.compile(r"\s*easyPH\s*v?\d*(?:\.\d+)*\s*", re.IGNORECASE)
 LANGUAGE_PROXIES = {
     "1-PE-FAKTOREN": "DE",
     "1-FACTORES EP": "ES",
@@ -46,6 +62,18 @@ class DetectedVersion:
 
 def _clean(value: str) -> str:
     return value.upper().strip().replace(" ", "").replace(".", "_")
+
+
+def strip_easyph_edition_tag(raw_version: str) -> str:
+    """Drop any 'easyPH' edition tag, leaving the rest of the string intact.
+
+    The unit-system suffix survives, because that IS part of the shape:
+
+        "10.6 easyPHv3"     -> "10.6"      -> EN_10_6
+        "10.6 easyPHv3 IP"  -> "10.6 IP"   -> EN_10_6IP
+        "10.6 IP"           -> "10.6 IP"   (unchanged)
+    """
+    return EASYPH_EDITION_TAG.sub(" ", str(raw_version)).strip()
 
 
 def _find_data_sheet(wb) -> Worksheet:
@@ -81,9 +109,13 @@ def detect_version(workbook_bytes: bytes) -> DetectedVersion:
             raise DetectionError(f"PHPP row {row} has no version cell: {non_blank}")
 
         raw_version = str(non_blank[1])
-        if "." not in raw_version:
+        # easyPH tags the edition onto the version; it shares its base version's
+        # shapefile, so drop the tag before splitting. `raw` keeps the original
+        # so callers can still see the workbook was an easyPH edition.
+        parsed_version = strip_easyph_edition_tag(raw_version)
+        if "." not in parsed_version:
             raise DetectionError(f"Unexpected version cell {raw_version!r}")
-        major, minor = raw_version.split(".", 1)
+        major, minor = parsed_version.split(".", 1)
 
         language = _detect_language(non_blank)
 
