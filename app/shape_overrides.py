@@ -34,7 +34,7 @@ SHAPE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
     # ranges sitting under name='PER SI' show how it happened: SI sheet names
     # pasted over an IP-derived shape.
     #
-    # Overridden here are the four sections that are consumed AND verified.
+    # Overridden here are the five sections that are consumed AND verified.
     # Verified means: the same address on the IP and SI panes holds the same
     # quantity, related by exactly PHPP's own conversion constant — checked on
     # two real v9.7 workbooks (250121_55th_IP9_741zhOb_FINAL.xlsx and
@@ -47,11 +47,15 @@ SHAPE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
     # 3.6166669768806825 kBtu/ft2yr — matching Phpp::Extract's independently
     # verified canonical cell reads exactly.
     #
+    # PER was excluded at first, on the grounds that its "Total energy demand"
+    # locator matched no row on v9.7 so the IP layout could not be verified.
+    # That precondition is gone: the v9 summary row is now located by its own
+    # in-column header (see kpis._find_v9_summary_row), so W18/Y18 resolve and
+    # the panes can be compared. They agree at the same ratio as everything
+    # else, headers included, so PER is overridden too and source_eui/pe_demand
+    # now come back in IP rather than null.
+    #
     # NOT overridden, deliberately:
-    #   PER      — its "Total energy demand" locator matches no row on v9.7 at
-    #              all (the label differs), so source_eui/pe_demand are already
-    #              null and repointing the sheet would not change that. The IP
-    #              layout cannot be verified while the locator does not resolve.
     #   OVERVIEW — self-consistent (name='Overview SI' with M2/M3 units, which
     #              is what that pane holds). The only field read from it is the
     #              project name, identical text on both panes. Repointing the
@@ -64,6 +68,7 @@ SHAPE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
         "COOLING_DEMAND": {"name": "Cooling", "unit": "KBTU"},
         "HEATING_PEAK_LOAD": {"name": "Heating load", "unit": "BTU/HR"},
         "COOLING_PEAK_LOAD": {"name": "Cooling load", "unit": "BTU/HR"},
+        "PER": {"name": "PER", "unit": "KBTU"},
     },
 }
 

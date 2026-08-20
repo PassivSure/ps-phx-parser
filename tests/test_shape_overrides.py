@@ -29,6 +29,7 @@ class TestApplyOverrides:
             "COOLING_DEMAND": {"name": "Cooling SI", "unit": "KWH"},
             "HEATING_PEAK_LOAD": {"name": "Heating load SI", "unit": "W"},
             "COOLING_PEAK_LOAD": {"name": "Cooling load SI", "unit": "W"},
+            "PER": {"name": "PER SI", "unit": "KWH"},
         }
 
     def test_returns_a_copy_rather_than_mutating_the_input(self):
@@ -70,6 +71,7 @@ class TestEn97IpShape:
             ("COOLING_DEMAND", "Cooling", "KBTU"),
             ("HEATING_PEAK_LOAD", "Heating load", "BTU/HR"),
             ("COOLING_PEAK_LOAD", "Cooling load", "BTU/HR"),
+            ("PER", "PER", "KBTU"),
         ],
     )
     def test_energy_sections_point_at_ip_sheets(
@@ -79,16 +81,15 @@ class TestEn97IpShape:
         assert sub.name == expected_name
         assert sub.unit == expected_unit
 
-    @pytest.mark.parametrize(
-        "section", ["PER", "OVERVIEW"]
-    )
-    def test_deliberately_unoverridden_sections_keep_their_si_pane(
-        self, shape, section
-    ):
-        """PER's locator matches no row on v9.7 regardless of pane, and
-        OVERVIEW is self-consistent with SI units. Both are left alone on
-        purpose — this pins that as a decision, not an oversight."""
-        assert getattr(shape, section).name.endswith(" SI")
+    def test_overview_deliberately_keeps_its_si_pane(self, shape):
+        """OVERVIEW is self-consistent with M2/M3 units and the only field read
+        from it is the project name, identical text on both panes. Left alone
+        on purpose — this pins that as a decision, not an oversight.
+
+        PER used to be listed here too. It was excluded only because its row
+        could not be located on v9.7, and once it could, the panes were
+        comparable and it was overridden."""
+        assert shape.OVERVIEW.name.endswith(" SI")
 
     def test_sibling_ip_shape_is_untouched(self):
         """EN_10_6IP already points at the IP sheets, so nothing should be
@@ -137,8 +138,8 @@ def test_en_9_7ip_is_the_only_shape_needing_correction():
         ]
         for version in available_versions()
     }
-    # EN_9_7IP's four consumed sections are corrected; PER and OVERVIEW are
-    # deliberately left on their SI panes (see shape_overrides).
-    assert affected["EN_9_7IP"] == ["PER", "OVERVIEW"]
+    # EN_9_7IP's five consumed sections are corrected; OVERVIEW alone is
+    # deliberately left on its SI pane (see shape_overrides).
+    assert affected["EN_9_7IP"] == ["OVERVIEW"]
     others = {v: s for v, s in affected.items() if v != "EN_9_7IP" and s}
     assert others == {}, f"another shape points at SI panes: {others}"

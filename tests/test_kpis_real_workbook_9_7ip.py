@@ -34,6 +34,10 @@ WORKBOOKS = {
         "cooling_demand": 4.214346069950888,
         "heating_peak": 6874.135536961924,  # max(P87=6874.14, R87=6298.17)
         "cooling_peak": 7716.21386353818,  # max(P60=7716.21, R60=5979.83)
+        # PER!W18 / Y18 — the v9 summary, which sits ABOVE the breakdown and
+        # carries no "Total energy demand" label. Null before that was handled.
+        "source_eui": 14.51462012718278,
+        "pe_demand": 33.39526371320298,
     },
     "17mile": {
         "path": DOWNLOADS / "250901.2821 17 mile drive.IP9.7.final.xlsx",
@@ -42,6 +46,8 @@ WORKBOOKS = {
         "cooling_demand": 1.4560853821638844,  # == canonical Verification!I38
         "heating_peak": 5724.443906475532,
         "cooling_peak": 3729.8902616382657,
+        "source_eui": 7.205476675544691,
+        "pe_demand": 15.655987902420204,
     },
 }
 
@@ -85,6 +91,18 @@ def test_peak_loads_are_ip(case):
     assert _close(kpis["peak_loads"]["cooling"]["value"], spec["cooling_peak"])
     assert kpis["peak_loads"]["heating"]["unit"] == "Btu/h"
     assert kpis["peak_loads"]["cooling"]["unit"] == "Btu/h"
+
+
+def test_per_totals_are_found_and_ip(case):
+    """v9.7 has no "Total energy demand" row, so both of these were null on
+    every v9.7 file until the summary was located by its in-column header."""
+    spec, kpis = case
+    assert _close(kpis["source_eui"]["value"], spec["source_eui"])
+    assert _close(kpis["pe_demand"]["value"], spec["pe_demand"])
+    assert kpis["source_eui"]["unit"] == "kBtu/ft2yr"
+    assert kpis["pe_demand"]["unit"] == "kBtu/ft2yr"
+    assert kpis["source_eui"]["source"] == "PER!W18"
+    assert kpis["pe_demand"]["source"] == "PER!Y18"
 
 
 def test_reads_name_the_ip_panes(case):

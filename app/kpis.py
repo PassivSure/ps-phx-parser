@@ -111,20 +111,55 @@ def _peak_load(
     }
 
 
+# v9.7 labels its summary columns in the column itself, and the strings differ
+# from v10's ("PER demand" / "PE demand"). That difference is what makes the
+# fallback in _per_total safe: these can only match a v9-shaped sheet.
+_V9_SUMMARY_HEADERS = {
+    "per_energy": "PER specific value",
+    "pe_energy": "PE Value",
+}
+
+# On v9.7 the summary sits 3 rows under its header (units row, factor-set row,
+# then the value) and the per-end-use breakdown starts at +5. The window stops
+# short of the breakdown deliberately: if the summary is ever blank, this must
+# return nothing rather than the heating row, which would be a plausible-looking
+# fraction of the right answer.
+_V9_SUMMARY_MAX_OFFSET = 4
+
+
 def _per_total(
     wb: Workbook, per: shape_model.PER, column: str
 ) -> dict[str, Any]:
-    """PER's grand-total row label is `Total energy demand <unit>`. The unit
-    suffix varies (kBTU/(ft²yr) vs kWh/(m²yr)) so we match by prefix in the
-    locator column. Hardcoding a row would break the moment a user adds
-    heating types and the table shifts."""
+    """The PER grand total, which sits in a different place on v9 and v10.
+
+    **v10** labels the row `Total energy demand <unit>` in the locator column
+    and puts it at the BOTTOM, after the per-end-use breakdown. The unit suffix
+    varies (kBTU/(ft²yr) vs kWh/(m²yr)) so we match by prefix. Hardcoding a row
+    would break the moment a user adds heating types and the table shifts.
+
+    **v9.7 has no such row at all** — the labels there are `Demand`,
+    `Demand, cumulative generation (annual balance)` and so on, none of which
+    start with "Total". Its summary sits at the TOP instead, between the header
+    block and the breakdown, and is identified by a header in its own column
+    rather than in the locator column. Before this was handled, source_eui and
+    pe_demand came back null on every v9.7 file.
+
+    The two layouts are inverted relative to the breakdown, so the v10 scan is
+    tried first and the v9 fallback only runs when it finds nothing. A blind
+    "first number under the header" rule would read v10's first BREAKDOWN row
+    as its total.
+    """
     ws = _sheet(wb, per.name)
     if ws is None:
         return {"value": None, "unit": _per_area_demand_unit(per.unit)}
 
     target_col = column_index_from_string(getattr(per.columns, column))
-    locator_col = column_index_from_string(per.locator_col)
-    row = _find_prefix_row(ws, locator_col, "Total energy demand")
+
+    row = _find_prefix_row(
+        ws, column_index_from_string(per.locator_col), "Total energy demand"
+    )
+    if row is None:
+        row = _find_v9_summary_row(ws, target_col, column)
     if row is None:
         return {"value": None, "unit": _per_area_demand_unit(per.unit)}
 
@@ -134,6 +169,28 @@ def _per_total(
         "unit": _per_area_demand_unit(per.unit),
         "source": f"{per.name}!{cell_ref}",
     }
+
+
+def _find_v9_summary_row(ws: Worksheet, target_col: int, column: str) -> int | None:
+    """Row of the v9 PER summary for `column`, or None.
+
+    Anchors on the header sitting in the target column itself, then takes the
+    first numeric cell in a bounded window below it — the intervening rows hold
+    the unit string and the factor-set dropdown, so no fixed offset is assumed.
+    """
+    header = _V9_SUMMARY_HEADERS.get(column)
+    if header is None:
+        return None
+
+    header_row = _find_prefix_row(ws, target_col, header)
+    if header_row is None:
+        return None
+
+    for offset in range(1, _V9_SUMMARY_MAX_OFFSET + 1):
+        row = header_row + offset
+        if _num(ws.cell(row=row, column=target_col).value) is not None:
+            return row
+    return None
 
 
 # --- helpers ---------------------------------------------------------------
