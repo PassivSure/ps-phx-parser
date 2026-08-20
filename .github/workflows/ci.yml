@@ -20,8 +20,22 @@ jobs:
       - name: Set up Python
         run: uv python install 3.13
 
+      # Heroku's Python buildpack installs with `uv sync --locked`, which
+      # refuses to resolve when uv.lock disagrees with pyproject.toml.
+      #
+      # CI used to run a bare `uv sync`, which does the opposite: it resolves
+      # the missing dependency, rewrites uv.lock inside the runner, and throws
+      # the rewrite away. Green build, broken release -- that is how judoscale
+      # reached main unlocked and failed the deploy while its PR passed.
+      #
+      # So both steps changed. This one fails fast with the message that names
+      # the actual problem, and `--locked` below stops the install from
+      # papering over it, which also makes CI install what the deploy installs.
+      - name: Check lockfile is up to date
+        run: uv lock --check
+
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-extras --dev --locked
 
       - name: Lint
         run: uv run ruff check .
