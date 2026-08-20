@@ -14,7 +14,8 @@ it can go.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 # version stem -> {section: {field: value}}
 SHAPE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
