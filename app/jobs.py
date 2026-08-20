@@ -18,8 +18,15 @@ polls ``/parse/{job_id}``.
 STATE IS DELIBERATELY IN-PROCESS, and that is a decision rather than an
 oversight:
 
-  * this service runs a SINGLE uvicorn worker, so there is no cross-process
-    sharing problem that a shared store would solve;
+  * this service runs a SINGLE uvicorn worker, which the Procfile now PINS with
+    `--workers 1`. That pin is load-bearing, not tidiness. Heroku's Python
+    buildpack sets WEB_CONCURRENCY from the dyno's memory at runtime — it never
+    appears in `heroku config` — so moving Standard-1X -> Standard-2X silently
+    took this service from 1 worker to 4. Each worker gets its own copy of the
+    dict below, so polls round-robin across them and roughly 3 in 4 return 404
+    for a job that exists. Observed exactly that: 10 x 200 and 10 x 404 over 20
+    consecutive polls of one job. Concurrency buys nothing here anyway, since
+    _PARSE_POOL serialises parses at max_workers=1;
   * jobs are short-lived, and the only consumer is a shadow path in ps-rails
     which feeds an offline comparison — nothing user-facing waits on it. Losing
     in-flight jobs when Heroku cycles the dyno (roughly daily) costs a retry,
