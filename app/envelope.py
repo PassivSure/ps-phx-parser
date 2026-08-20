@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from openpyxl.utils import column_index_from_string
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from PHX.PHPP.phpp_localization import shape_model
@@ -76,8 +76,17 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
         return []
 
     desc_col = column_index_from_string(rows.inputs.description.column)
-    area_col = column_index_from_string(rows.inputs.area.column)
     group_col = column_index_from_string(rows.inputs.group_number.column)
+
+    # The shape's `area` input is the USER-OVERRIDE column ("User determined
+    # [ft2]" on v9.7, "User-defined calculation [ft2]" on v10) -- empty for
+    # every surface PHPP computes from its own a x b entry, which is most of
+    # them. PHPP's result is a separate column headed "Area [ft2]", so prefer
+    # that and keep the override as the fallback.
+    area_col = _computed_area_col(ws, header_row + 1) or column_index_from_string(
+        rows.inputs.area.column
+    )
+    area_letter = get_column_letter(area_col)
 
     out: list[dict[str, Any]] = []
     # Skip the header label row (header_row + 1 holds column labels like
@@ -98,7 +107,7 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
                 "component": component_type,
                 "label": str(desc),
                 "area_ft2": area,
-                "source_area": f"{areas.name}!{rows.inputs.area.column}{r}",
+                "source_area": f"{areas.name}!{area_letter}{r}",
             }
         )
     return out
@@ -174,16 +183,61 @@ def _airtightness(
 
 
 def _classify(group_raw: Any) -> str | None:
-    """Parse the integer prefix from e.g. ``"8-External wall - ambient"``
-    and map to the schema component enum. Returns None for groups we
-    intentionally skip (footprint/TFA/window placeholders) or don't
-    recognise."""
-    if not isinstance(group_raw, str):
+    """Map an area-group cell to the schema component enum.
+
+    Returns None for groups we intentionally skip (footprint/TFA/window
+    placeholders) and for anything unrecognised, so the skip behaviour is the
+    same whichever form the cell takes.
+    """
+    number = _group_number(group_raw)
+    if number is None:
         return None
-    match = _GROUP_PREFIX.match(group_raw)
-    if not match:
+    return GROUP_TO_COMPONENT.get(number)
+
+
+def _group_number(group_raw: Any) -> int | None:
+    """The group number, from either form PHPP writes.
+
+    v10 stores the labelled dropdown member as text -- ``"8-External wall -
+    ambient"``. **v9.7 stores the bare number**, and openpyxl hands it back as
+    an int. Accepting only the text form silently skipped every surface on
+    every v9.7 file: the components list came back holding thermal bridges
+    alone, which looks like a building with no walls rather than like a bug.
+    """
+    # bool is an int subclass, and a checkbox is not a group number.
+    if isinstance(group_raw, bool):
         return None
-    return GROUP_TO_COMPONENT.get(int(match.group(1)))
+    if isinstance(group_raw, int):
+        return group_raw
+    if isinstance(group_raw, float):
+        return int(group_raw) if group_raw.is_integer() else None
+    if isinstance(group_raw, str):
+        match = _GROUP_PREFIX.match(group_raw)
+        if match:
+            return int(match.group(1))
+        stripped = group_raw.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def _computed_area_col(ws: Worksheet, label_row: int) -> int | None:
+    """Index of the column headed ``Area [<unit>]`` on the surface table's
+    label row, or None.
+
+    Located by label rather than by offset: it sits at AB on v9.7 and Z on
+    v10, and the unit in the header varies with the workbook. The other
+    area-bearing columns are all qualified ("User determined [ft2]",
+    "Subtraction window areas [ft2]"), so the bare prefix is unambiguous --
+    verified as a unique match on three real workbooks.
+    """
+    for col in range(1, ws.max_column + 1):
+        value = ws.cell(row=label_row, column=col).value
+        if isinstance(value, str) and " ".join(value.split()).lower().startswith(
+            "area ["
+        ):
+            return col
+    return None
 
 
 def _find_header_row(ws: Worksheet, col_letter: str, needle: str) -> int | None:

@@ -2,9 +2,16 @@
 
 from io import BytesIO
 
+import pytest
 from openpyxl import load_workbook
 
-from app.envelope import read_envelope
+from app.envelope import (
+    _classify,
+    _computed_area_col,
+    _group_number,
+    _surface_components,
+    read_envelope,
+)
 from app.parser import load_shape
 
 
@@ -109,3 +116,101 @@ def test_iterate_until_blank_terminates_on_blank_description(shape_en_10_6ip):
     assert "Wall_A" in labels
     assert "Roof_A" in labels
     assert "STRAY_AFTER_BLANK" not in labels
+
+
+# --- group-number parsing --------------------------------------------------
+#
+# v10 writes the labelled dropdown member as text; v9.7 writes the bare number.
+# Accepting only the text form skipped every surface on every v9.7 file.
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("8-External wall - ambient", 8),  # v10
+        ("11-Floor slab / Basement ceiling", 11),
+        (8, 8),  # v9.7 — openpyxl hands back an int
+        (11, 11),
+        (8.0, 8),  # defensively: a float that is a whole number
+        ("8", 8),  # a numeric string
+        ("  8  ", 8),
+        (8.5, None),  # not a group number
+        (None, None),
+        ("", None),
+        ("wall", None),
+        (True, None),  # bool is an int subclass; a checkbox is not a group
+    ],
+)
+def test_group_number_accepts_both_forms(raw, expected):
+    assert _group_number(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [0, 1, 2, 6, "0-Projected building footprint"])
+def test_aggregate_and_window_groups_are_still_skipped(raw):
+    """The skip must not depend on which form the cell takes — a bare 0 is as
+    much an aggregate row as '0-Projected building footprint'."""
+    assert _classify(raw) is None
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [(7, "door"), (8, "wall"), (9, "wall"), (10, "roof"), (11, "slab_on_grade")],
+)
+def test_classify_maps_bare_numbers(raw, expected):
+    assert _classify(raw) == expected
+
+
+# --- computed area column --------------------------------------------------
+
+
+def _areas_sheet(area_header="Area [ft²]"):
+    """Surface table with BOTH an override column and PHPP's computed one, so
+    a test can tell which was read."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Areas"
+    ws["K31"] = "Area input"
+    ws["L32"] = "Building assembly description"
+    ws["M32"] = "To group No."
+    ws["T32"] = "User-defined calculation [ft²]"
+    if area_header:
+        ws["Z32"] = area_header
+    ws["L33"] = "Wall_001"
+    ws["M33"] = 8  # bare int, the v9.7 form
+    ws["T33"] = 111.0  # override — empty in real files for computed surfaces
+    ws["Z33"] = 999.0  # PHPP's own result
+    return wb
+
+
+def test_computed_area_column_is_located_by_label():
+    wb = _areas_sheet()
+    assert _computed_area_col(wb["Areas"], 32) == 26  # Z
+
+
+def test_computed_area_column_absent_returns_none():
+    wb = _areas_sheet(area_header=None)
+    assert _computed_area_col(wb["Areas"], 32) is None
+
+
+def test_surfaces_prefer_phpps_computed_area_over_the_override(shape_en_10_6ip):
+    """The shape's `area` input points at the USER OVERRIDE, which is empty for
+    every surface PHPP computes itself — most of them. Reading it emitted
+    area_ft2=None for 40 of 41 surfaces on a real v10 file."""
+    wb = _areas_sheet()
+    surfaces = _surface_components(wb, shape_en_10_6ip.AREAS)
+
+    assert len(surfaces) == 1
+    assert surfaces[0]["area_ft2"] == 999.0
+    assert surfaces[0]["source_area"] == "Areas!Z33"
+
+
+def test_falls_back_to_the_override_when_there_is_no_computed_column(
+    shape_en_10_6ip,
+):
+    wb = _areas_sheet(area_header=None)
+    surfaces = _surface_components(wb, shape_en_10_6ip.AREAS)
+
+    assert surfaces[0]["area_ft2"] == 111.0
+    assert surfaces[0]["source_area"] == "Areas!T33"
