@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, validate
 
 from app.main import app
+from tests.conftest import parse_and_wait
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "schema" / "output.schema.json"
@@ -40,10 +41,10 @@ def test_parse_response_validates_against_schema(workbook_bytes_with_version, sc
         return_value=httpx.Response(200, content=workbook_bytes_with_version)
     )
 
-    response = client.post("/parse", json={"url": WORKBOOK_URL})
-    assert response.status_code == 200
+    settled = parse_and_wait(client, WORKBOOK_URL)
+    assert settled["status"] == "done", settled.get("detail")
 
-    validate(instance=response.json(), schema=schema)
+    validate(instance=settled["result"], schema=schema)
 
 
 @respx.mock
@@ -62,10 +63,10 @@ def test_parse_response_with_all_subtrees_validates(shape_en_10_6ip, schema):
     )
     respx.get(WORKBOOK_URL).mock(return_value=httpx.Response(200, content=body))
 
-    response = client.post("/parse", json={"url": WORKBOOK_URL})
-    assert response.status_code == 200
+    settled = parse_and_wait(client, WORKBOOK_URL)
+    assert settled["status"] == "done", settled.get("detail")
 
-    body = response.json()
+    body = settled["result"]
     assert body["kpis"]["tfa"]["value"] == 2400.0
     assert len(body["envelope"]["components"]) > 0
     assert body["envelope"]["airtightness"]["n50_ach"] == 0.6

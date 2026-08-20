@@ -73,8 +73,12 @@ def test_parse_accepts_correct_bearer_token(auth_enabled, workbook_bytes):
         headers={"Authorization": f"Bearer {TOKEN}"},
         json={"url": WORKBOOK_URL, "phpp_version": "EN_10_6IP"},
     )
-    assert response.status_code == 200
-    assert response.json()["parser"]["phpp_version"] == "EN_10_6IP"
+    # /parse is asynchronous now: a correct token gets the 202 accept, and the
+    # parsed body is fetched from /parse/{job_id}. This test is about auth, so
+    # asserting the accept is the whole point — the parse itself is covered in
+    # tests/test_parse_endpoint.py.
+    assert response.status_code == 202
+    assert response.json()["status"] == "pending"
 
 
 @respx.mock
@@ -87,4 +91,4 @@ def test_parse_auth_disabled_when_env_unset(monkeypatch, workbook_bytes):
     response = client.post(
         "/parse", json={"url": WORKBOOK_URL, "phpp_version": "EN_10_6IP"}
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
