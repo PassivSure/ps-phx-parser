@@ -38,8 +38,11 @@ def test_real_component_counts_by_type(real_envelope):
     for c in real_envelope["components"]:
         counts.setdefault(c["component"], 0)
         counts[c["component"]] += 1
+    # No "door" key: this building has no exterior door. The row PHPP seeds
+    # for area group 7 carries no quantity, so its area formula yields "" and
+    # PHPP totals the group as 0. It used to be counted as a door — see
+    # test_no_phantom_door below.
     assert counts == {
-        "door": 1,
         "slab_on_grade": 1,
         "roof": 4,
         "wall": 20,
@@ -64,12 +67,21 @@ def test_real_slab_label_and_area(real_envelope):
     assert isclose(slabs[0]["area_ft2"], 9056.111, rel_tol=0.001)
 
 
-def test_real_door_label(real_envelope):
-    """The single door entry in this file has no area filled in (it's a
-    template row); we still emit it because the description is set."""
+def test_no_phantom_door(real_envelope):
+    """This reverses a previously pinned behaviour, deliberately.
+
+    The old assertion read: "The single door entry in this file has no area
+    filled in (it's a template row); we still emit it because the description
+    is set." So the template row was recognised and emitting it was a choice.
+
+    It was the wrong one. PHPP seeds one such row per area group and totals an
+    unused group as **0** — this file's own Summary block says `door: 0.0`. A
+    consumer counting doors got one that does not exist, with a null area, on
+    every building without an exterior door. Agreeing with the workbook means
+    emitting nothing.
+    """
     doors = [c for c in real_envelope["components"] if c["component"] == "door"]
-    assert len(doors) == 1
-    assert doors[0]["label"] == "Exterior door"
+    assert doors == []
 
 
 def test_real_thermal_bridges(real_envelope):

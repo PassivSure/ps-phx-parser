@@ -83,9 +83,8 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
     # every surface PHPP computes from its own a x b entry, which is most of
     # them. PHPP's result is a separate column headed "Area [ft2]", so prefer
     # that and keep the override as the fallback.
-    area_col = _computed_area_col(ws, header_row + 1) or column_index_from_string(
-        rows.inputs.area.column
-    )
+    computed_area_col = _computed_area_col(ws, header_row + 1)
+    area_col = computed_area_col or column_index_from_string(rows.inputs.area.column)
     area_letter = get_column_letter(area_col)
 
     out: list[dict[str, Any]] = []
@@ -102,6 +101,22 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
             continue  # group 0/1/2-6 — aggregates and window placeholders
 
         area = _num(ws.cell(row=r, column=area_col).value)
+        if computed_area_col and area is None:
+            # PHPP seeds the table with one placeholder row per area group, and
+            # their area formula is `IF(ISNUMBER(<quantity>), ..., "")` -- so an
+            # unused group yields a blank rather than a zero. Groups 0-6 are
+            # dropped by _classify anyway; group 7 maps to `door`, so its
+            # placeholder used to surface as an exterior door with no area on
+            # any building that has none. PHPP totals such a group as 0, so
+            # skipping the row agrees with the workbook rather than departing
+            # from it.
+            #
+            # Gated on having found PHPP's computed column, because on the
+            # fallback path the value read is the user OVERRIDE, where blank is
+            # the normal case and means "not overridden" -- skipping there
+            # would drop most of the envelope.
+            continue
+
         out.append(
             {
                 "component": component_type,

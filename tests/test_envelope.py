@@ -214,3 +214,56 @@ def test_falls_back_to_the_override_when_there_is_no_computed_column(
 
     assert surfaces[0]["area_ft2"] == 111.0
     assert surfaces[0]["source_area"] == "Areas!T33"
+
+
+# --- unused group placeholders ---------------------------------------------
+
+
+def _areas_sheet_with_placeholder():
+    """A surface table holding PHPP's built-in group-7 placeholder with no
+    quantity entered, plus one real wall."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Areas"
+    ws["K31"] = "Area input"
+    ws["L32"] = "Building assembly description"
+    ws["M32"] = "To group No."
+    ws["T32"] = "User-defined calculation [ft²]"
+    ws["Z32"] = "Area [ft²]"
+    # the placeholder: labelled, classified as a door, but PHPP's formula
+    # yields "" because no quantity was entered
+    ws["L33"] = "Exterior door"
+    ws["M33"] = "7-Exterior door"
+    ws["Z33"] = None
+    # a real entry
+    ws["L34"] = "W-B"
+    ws["M34"] = 8
+    ws["Z34"] = 194.7
+    return wb
+
+
+def test_unused_group_placeholder_is_not_emitted(shape_en_10_6ip):
+    """PHPP totals an unused group as 0, so dropping the row agrees with the
+    workbook. Before this, a building with no exterior door reported one."""
+    surfaces = _surface_components(
+        _areas_sheet_with_placeholder(), shape_en_10_6ip.AREAS
+    )
+
+    assert [s["label"] for s in surfaces] == ["W-B"]
+
+
+def test_placeholder_skip_does_not_apply_on_the_override_fallback(
+    shape_en_10_6ip,
+):
+    """The skip is gated on having found PHPP's computed column. On the
+    fallback the value read is the user OVERRIDE, where blank is the normal
+    case — skipping there would drop most of the envelope."""
+    wb = _areas_sheet_with_placeholder()
+    del wb["Areas"]["Z32"]  # no computed column -> fall back to the override
+
+    surfaces = _surface_components(wb, shape_en_10_6ip.AREAS)
+
+    assert [s["label"] for s in surfaces] == ["Exterior door", "W-B"]
+    assert all(s["area_ft2"] is None for s in surfaces)

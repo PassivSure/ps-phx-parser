@@ -35,12 +35,17 @@ DOWNLOADS = pathlib.Path.home() / "Downloads"
 SUMMARY_LAYOUT = {
     "EN_9_7IP": ("M", "N"),  # (group col, area col)
     "EN_10_6IP": ("N", "L"),
+    "EN_10_6": ("N", "L"),
 }
 
 CASES = {
     "55th_v97": ("250121_55th_IP9_741zhOb_FINAL.xlsx", "EN_9_7IP"),
     "17mile_v97": ("250901.2821 17 mile drive.IP9.7.final.xlsx", "EN_9_7IP"),
     "6840_v106": ("260309 PHPP 6840 E ^th Ave Pkwy v 10.6.xlsx", "EN_10_6IP"),
+    # easyPH, and the only file in the corpus with an unused area group --
+    # its exterior-door placeholder carries no quantity, so PHPP totals the
+    # group as 0 and the row must not surface as a door.
+    "holmes_easyph": ("2536 Holmes_easyPH_260512.xlsx", "EN_10_6"),
 }
 
 
@@ -91,12 +96,18 @@ def _parsed_totals(envelope):
 
 
 def test_every_component_total_matches_phpps_own(case):
+    """Compared over the union with a 0.0 default, not by set equality: a
+    component with no rows totals zero, and PHPP reports it that way. Holmes
+    has no exterior door, so PHPP says `door: 0.0` while the parser emits no
+    door row at all — those agree, and set equality would call them different.
+    """
     envelope, phpp = case
     parsed = _parsed_totals(envelope)
 
-    assert set(parsed) == set(phpp)
-    for component, expected in phpp.items():
-        assert parsed[component] == pytest.approx(expected, rel=1e-9), component
+    for component in set(parsed) | set(phpp):
+        assert parsed.get(component, 0.0) == pytest.approx(
+            phpp.get(component, 0.0), rel=1e-9, abs=1e-9
+        ), component
 
 
 def test_surfaces_are_present_and_all_carry_an_area(case):
@@ -116,3 +127,15 @@ def test_walls_are_the_largest_opaque_group(case):
     silently shifted, walls would stop dominating."""
     _, phpp = case
     assert phpp["wall"] == max(phpp.values())
+
+
+def test_no_surface_is_emitted_without_an_area(case):
+    """PHPP seeds one placeholder row per area group whose formula yields ""
+    when the group is unused. Group 7 maps to `door`, so before this was
+    handled a building with no exterior door reported one anyway, with a null
+    area."""
+    envelope, _ = case
+    surfaces = [
+        c for c in envelope["components"] if c["component"] != "thermal_bridge"
+    ]
+    assert all(s["area_ft2"] is not None for s in surfaces)
