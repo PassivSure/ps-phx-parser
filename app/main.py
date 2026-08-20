@@ -1,7 +1,9 @@
 """ps-phx-parser FastAPI entry point."""
 
+import os
 import pathlib
 import tomllib
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -10,6 +12,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
+from judoscale.asgi.middleware import FastAPIRequestQueueTimeMiddleware
 from pydantic import BaseModel, HttpUrl
 
 from app import jobs
@@ -49,6 +52,35 @@ app = FastAPI(
     description="Headless PHPP reader using PHX field mappings + openpyxl.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Request-queue-time reporting for Judoscale autoscaling.
+#
+# The Heroku add-on exports RAILS_AUTOSCALE_URL, but judoscale's Python package
+# reads only JUDOSCALE_URL (judoscale/core/config.py). Left unhandled it installs
+# cleanly, logs "Not activated - no API URL provided" and reports nothing — a
+# silent no-op that looks like a working integration.
+#
+# Passed as extra_config rather than by setting os.environ["JUDOSCALE_URL"]
+# first: judoscale builds its config singleton at IMPORT time, so an assignment
+# anywhere below the import above is already too late. The middleware calls
+# judoconfig.update(extra_config) before checking is_enabled, which is the
+# supported way in.
+def judoscale_api_url(env: Mapping[str, str] = os.environ) -> str | None:
+    """Resolve the reporting URL, preferring judoscale's own variable.
+
+    Takes `env` so this is testable without mutating the process environment or
+    reloading this module — other suites hold references to `app`, and reloading
+    it swaps that object out from under them.
+    """
+    return env.get("JUDOSCALE_URL") or env.get("RAILS_AUTOSCALE_URL")
+
+
+JUDOSCALE_API_URL = judoscale_api_url()
+
+app.add_middleware(
+    FastAPIRequestQueueTimeMiddleware,
+    extra_config={"API_BASE_URL": JUDOSCALE_API_URL} if JUDOSCALE_API_URL else {},
 )
 
 FETCH_TIMEOUT_SECONDS = 30.0
