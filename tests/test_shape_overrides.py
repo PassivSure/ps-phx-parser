@@ -6,7 +6,7 @@ The EN_9_7IP entry is the reason this mechanism exists; see
 
 import pytest
 
-from app.parser import load_shape
+from app.parser import available_versions, load_shape
 from app.shape_overrides import SHAPE_OVERRIDES, apply_overrides
 
 
@@ -102,3 +102,43 @@ class TestEn97IpShape:
         """EN_10_6 is a genuine SI shape; its SI sheets are correct."""
         shape = load_shape("EN_10_6")
         assert shape.HEATING_DEMAND.unit.upper() == "KWH"
+
+
+# Sections whose sheet name would reveal the same SI-pointing defect.
+_PANE_SECTIONS = (
+    "HEATING_DEMAND",
+    "COOLING_DEMAND",
+    "HEATING_PEAK_LOAD",
+    "COOLING_PEAK_LOAD",
+    "PER",
+    "OVERVIEW",
+    "AREAS",
+    "UVALUES",
+    "VENTILATION",
+    "VERIFICATION",
+)
+
+
+def test_en_9_7ip_is_the_only_shape_needing_correction():
+    """Sweep every shape PHX ships, not just the one sibling.
+
+    The claim this fix rests on is that the SI-pointing is confined to
+    EN_9_7IP. That was originally checked against EN_10_6IP alone, which
+    skipped EN_10_4IP — the other IP shape. Asserting it across the whole set
+    is what makes the claim hold, and it fails loudly if a PHX upgrade
+    introduces the same defect elsewhere or fixes this one upstream.
+    """
+    affected = {
+        version: [
+            section
+            for section in _PANE_SECTIONS
+            # the raw upstream name, before any override
+            if str(getattr(load_shape(version), section).name).endswith(" SI")
+        ]
+        for version in available_versions()
+    }
+    # EN_9_7IP's four consumed sections are corrected; PER and OVERVIEW are
+    # deliberately left on their SI panes (see shape_overrides).
+    assert affected["EN_9_7IP"] == ["PER", "OVERVIEW"]
+    others = {v: s for v, s in affected.items() if v != "EN_9_7IP" and s}
+    assert others == {}, f"another shape points at SI panes: {others}"
