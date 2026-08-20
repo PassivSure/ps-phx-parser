@@ -9,6 +9,7 @@ envelope, hvac_equipment, project_info.
 
 from __future__ import annotations
 
+import json
 import pathlib
 from functools import lru_cache
 from io import BytesIO
@@ -20,6 +21,7 @@ from PHX.PHPP.phpp_localization import shape_model
 from app.envelope import read_envelope
 from app.kpis import read_kpis
 from app.project_info import read_project_info
+from app.shape_overrides import apply_overrides
 
 SHAPES_DIR = pathlib.Path(shape_model.__file__).parent
 
@@ -35,13 +37,18 @@ def available_versions() -> list[str]:
 
 @lru_cache(maxsize=16)
 def load_shape(version: str) -> shape_model.PhppShape:
-    """Load and cache a PhppShape by its filename stem (e.g. 'EN_10_6IP')."""
+    """Load and cache a PhppShape by its filename stem (e.g. 'EN_10_6IP').
+
+    Upstream shapes pass through untouched unless `app.shape_overrides` names
+    a correction for this version — see that module for why any exists.
+    """
     path = SHAPES_DIR / f"{version}.json"
     if not path.is_file():
         raise ParseError(
             f"Unknown phpp_version {version!r}. Available: {available_versions()}"
         )
-    return shape_model.PhppShape.model_validate_json(path.read_bytes())
+    data = apply_overrides(version, json.loads(path.read_bytes()))
+    return shape_model.PhppShape.model_validate(data)
 
 
 def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
