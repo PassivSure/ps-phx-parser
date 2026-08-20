@@ -2,10 +2,17 @@
 
 from io import BytesIO
 
+import pytest
 from openpyxl import load_workbook
 
 from app.parser import load_shape
-from app.project_info import read_project_info
+from app.project_info import (
+    _address_fields,
+    _address_row,
+    _is_organization_label,
+    _organizations,
+    read_project_info,
+)
 
 
 def _info(workbook_bytes: bytes) -> dict:
@@ -93,3 +100,138 @@ def test_handles_missing_overview_and_verification(workbook_bytes):
     assert info["occupancy_type"] is None
     assert info["verification_complete"] is False
     assert info["organizations"] == []
+
+
+# --- v9.7 layout -----------------------------------------------------------
+#
+# v9.7 differs from v10 in both blocks this module reads, and in different
+# ways: the Verification address block sits one row higher, and the Overview
+# organization block sits at different rows AND uses different role labels.
+# Hardcoded positions read a state as a zip and an interior-temperature
+# setpoint as a firm name.
+
+
+def _v97_verification():
+    """v9.7's address block — one row higher than v10's."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Verification"
+    ws["J4"] = "Building:"
+    ws["K4"] = "Younis/Pang Residence"
+    ws["J5"] = "Street:"
+    ws["K5"] = "643 55th Street"
+    ws["J6"] = "Postcode/City:"
+    ws["K6"] = "95819"
+    ws["L6"] = "Sacramento"
+    ws["J7"] = "Province/Country:"
+    ws["K7"] = "California"
+    return wb
+
+
+def test_address_row_found_by_label_not_position():
+    ws = _v97_verification()["Verification"]
+    assert _address_row(ws, "street") == 5
+    assert _address_row(ws, "postcode/city") == 6
+    assert _address_row(ws, "province/country") == 7
+
+
+def test_v97_address_fields_are_not_shifted():
+    """The regression: with v10's cells hardcoded, K7 is the postcode there
+    and the province here, so a v9.7 file reported 'California' as its zip."""
+    fields = _address_fields(_v97_verification()["Verification"])
+
+    assert fields["street"] == "643 55th Street"
+    assert fields["postal_code"] == "95819"
+    assert fields["city"] == "Sacramento"
+    assert fields["state_country"] == "California"
+
+
+def test_address_fields_absent_labels_yield_none():
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active.title = "Verification"
+    fields = _address_fields(wb["Verification"])
+    assert all(v is None for v in fields.values())
+
+
+# --- organization label vocabulary -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # v10.6
+        "Home owner name / E-mail",
+        "Architect name / E-mail",
+        "Mechanical engineer name / E-mail",
+        "Energy consultant name / E-mail",
+        "Civil engineer name / E-mail",
+        "Certification body Name / E-mail",
+        # v9.7
+        "Home owner / Client",
+        "Architect",
+        "Building services",
+        "PHPP / Energy balance",
+        "Building physics",
+        "Structural engineering",
+        "Certification body",
+    ],
+)
+def test_real_role_labels_are_recognised(label):
+    assert _is_organization_label(label)
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # These are what row constants actually picked up on v9.7 — the
+        # reported "organizations" were 20 and 2.36, a temperature and a
+        # heat-gain figure.
+        "Interior temperatures winter / summer",
+        "IHG winter / summer",
+        "Specific values according to Passive House",
+        "Treated floor area ATFA / Exterior volume",
+        # near-misses that must not collide with "Building services" /
+        # "Building physics"
+        "Building type / Building status",
+        "Building category, in terms of energy",
+        "Building type / Construction",
+        "Year of construction / Year of construction",
+        "Type of certification",
+    ],
+)
+def test_non_role_labels_are_rejected(label):
+    assert not _is_organization_label(label)
+
+
+def test_v97_organizations_read_names_not_setpoints(shape_en_10_6ip):
+    """End-to-end over a v9.7-shaped Overview: the roles sit where v10 keeps
+    unrelated numbers, so a positional reader returns '20' as a firm."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = shape_en_10_6ip.OVERVIEW.name
+    rows = {
+        26: ("Home owner / Client", "Maria Pang/Laith Younis"),
+        27: ("Architect", "Bronwyn Barry/Passive House BB"),
+        28: ("Building services", "Essential Air"),
+        31: ("Structural engineering", None),  # empty name — skipped
+        35: ("Interior temperatures winter / summer", "20"),
+        36: ("IHG winter / summer", "2.36"),
+    }
+    for row, (label, name) in rows.items():
+        ws[f"B{row}"] = label
+        if name is not None:
+            ws[f"C{row}"] = name
+
+    orgs = _organizations(wb, shape_en_10_6ip)
+
+    assert [o["name"] for o in orgs] == [
+        "Maria Pang/Laith Younis",
+        "Bronwyn Barry/Passive House BB",
+        "Essential Air",
+    ]
