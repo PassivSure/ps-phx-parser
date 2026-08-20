@@ -188,9 +188,16 @@ def build_workbook_bytes(
         vf_ws = wb["Verification"] if "Verification" in wb.sheetnames else wb.create_sheet(
             shape.VERIFICATION.name
         )
+        # The address block is LABEL-located (column J), because v9.7 sits one
+        # row higher than v10 — so the labels are part of the fixture, not
+        # decoration. Writing the values alone would let a reader that
+        # hardcodes cells pass a test the real sheet fails.
+        vf_ws["J6"] = "Street:"
         vf_ws["K6"] = "100 Main St"
+        vf_ws["J7"] = "Postcode/City:"
         vf_ws["K7"] = '"94028"'  # PHPP wraps zips in literal quotes
         vf_ws["L7"] = "Sunnyvale"
+        vf_ws["J8"] = "Province/Country:"
         vf_ws["K8"] = "CA"
 
         # phi_building_use_type via locator pattern

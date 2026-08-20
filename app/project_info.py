@@ -29,21 +29,55 @@ from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from PHX.PHPP.phpp_localization import shape_model
 
-# Overview rows where label/name pairs for project organizations live.
-# Pinned 2026-05-04 against the canonical 10.6 IP file.
-ORGANIZATION_ROWS = (31, 33, 34, 35, 36, 48)
 ORGANIZATION_LABEL_COL = "B"
 ORGANIZATION_NAME_COL = "C"
 
-# Verification sheet header cells that hold project address fields.
-# These are not in the PHX shape; they're the standard locations PHPP uses
-# in its Verification-sheet header.
-ADDRESS_CELLS = {
-    "street": "K6",
-    "postal_code": "K7",
-    "city": "L7",
-    "state_country": "K8",
+# Role labels in Overview column B, as a prefix each row must start with.
+# The two versions name the same block differently and put it in different
+# places -- v10 has "Architect name / E-mail" at row 33, v9.7 has "Architect"
+# at row 27 -- so the union of both vocabularies is scanned and the row is
+# found by its label. Row constants pinned against one file read v9.7's
+# "Interior temperatures winter / summer" as an organization and reported its
+# value, 20, as the firm's name.
+#
+# Prefixes must stay specific enough not to collide: "Building services" and
+# "Building physics" are roles, while "Building type / Building status" and
+# "Building category" are not, and none of the four is a prefix of another.
+ORGANIZATION_LABEL_PREFIXES = (
+    # shared
+    "home owner",
+    "architect",
+    "certification body",
+    # v10.6
+    "mechanical engineer",
+    "energy consultant",
+    "civil engineer",
+    # v9.7
+    "building services",
+    "phpp / energy balance",
+    "building physics",
+    "structural engineering",
+    "contractor / tradesperson",
+)
+
+# Row bound for the Overview scan. The block sits in the twenties/forties on
+# both versions; stopping well before the KPI block below it keeps a stray
+# match from reaching numbers.
+ORGANIZATION_SCAN_MAX_ROW = 60
+
+# Address fields live in the Verification header, which PHX's shape does not
+# map. They are found by the label in column J rather than by cell, because
+# **the v9.7 block sits exactly one row higher than v10's** -- the same 1-row
+# shift the verification results block carries. Hardcoded to v10, "K7" is the
+# postcode there and the province here, so a v9.7 file reported its state as
+# its zip code.
+ADDRESS_LABEL_COL = "J"
+ADDRESS_LABELS = {
+    "street": "street",
+    "postcode_city": "postcode/city",
+    "state_country": "province/country",
 }
+ADDRESS_SCAN_MAX_ROW = 30
 
 
 def read_project_info(wb: Workbook, shape: shape_model.PhppShape) -> dict[str, Any]:
@@ -65,11 +99,51 @@ def _project_name(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
     return _str(ws[address].value)
 
 
+def _address_row(ws: Worksheet, label: str) -> int | None:
+    """Row whose column-J label starts with `label`, or None."""
+    col = column_index_from_string(ADDRESS_LABEL_COL)
+    needle = label.strip().lower()
+    for row in range(1, min(ws.max_row, ADDRESS_SCAN_MAX_ROW) + 1):
+        value = ws.cell(row=row, column=col).value
+        if isinstance(value, str) and value.strip().lower().startswith(needle):
+            return row
+    return None
+
+
+def _address_fields(ws: Worksheet) -> dict[str, str | None]:
+    """Street / postcode / city / state, located by their own labels.
+
+    PHPP puts the postcode and city on one row (K and L) under a single
+    "Postcode/City:" label, and the province in K of the next labelled row.
+    """
+    fields: dict[str, str | None] = {
+        "street": None,
+        "postal_code": None,
+        "city": None,
+        "state_country": None,
+    }
+
+    street_row = _address_row(ws, ADDRESS_LABELS["street"])
+    if street_row:
+        fields["street"] = _str(ws.cell(row=street_row, column=11).value)  # K
+
+    pc_row = _address_row(ws, ADDRESS_LABELS["postcode_city"])
+    if pc_row:
+        fields["postal_code"] = _str(ws.cell(row=pc_row, column=11).value)  # K
+        fields["city"] = _str(ws.cell(row=pc_row, column=12).value)  # L
+
+    state_row = _address_row(ws, ADDRESS_LABELS["state_country"])
+    if state_row:
+        fields["state_country"] = _str(ws.cell(row=state_row, column=11).value)
+
+    return fields
+
+
 def _postal_code(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
     ws = _sheet(wb, shape.VERIFICATION.name)
     if ws is None:
         return None
-    raw = _str(ws[ADDRESS_CELLS["postal_code"]].value)
+    raw = _address_fields(ws)["postal_code"]
     if raw is None:
         return None
     # PHPP wraps zips in literal quotes (e.g. '"03049"') to keep leading
@@ -84,9 +158,10 @@ def _location_string(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
     if ws is None:
         return None
 
-    street = _str(ws[ADDRESS_CELLS["street"]].value)
-    city = _str(ws[ADDRESS_CELLS["city"]].value)
-    state = _str(ws[ADDRESS_CELLS["state_country"]].value)
+    fields = _address_fields(ws)
+    street = fields["street"]
+    city = fields["city"]
+    state = fields["state_country"]
     zip_ = _postal_code(wb, shape)
 
     parts: list[str] = []
@@ -126,8 +201,9 @@ def _occupancy_type(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
 def _organizations(
     wb: Workbook, shape: shape_model.PhppShape
 ) -> list[dict[str, str]]:
-    """Each pinned row in Overview has a role label in column B and a
-    firm/person name in column C. Empty-name rows are skipped."""
+    """Overview carries a role label in column B and the firm/person name in
+    column C. Rows are found by their label, not by position -- see
+    ORGANIZATION_LABEL_PREFIXES. Empty-name rows are skipped."""
     ws = _sheet(wb, shape.OVERVIEW.name)
     if ws is None:
         return []
@@ -135,13 +211,20 @@ def _organizations(
     out: list[dict[str, str]] = []
     label_col = column_index_from_string(ORGANIZATION_LABEL_COL)
     name_col = column_index_from_string(ORGANIZATION_NAME_COL)
-    for row in ORGANIZATION_ROWS:
+    for row in range(1, min(ws.max_row, ORGANIZATION_SCAN_MAX_ROW) + 1):
         label = _str(ws.cell(row=row, column=label_col).value)
+        if not label or not _is_organization_label(label):
+            continue
         name = _str(ws.cell(row=row, column=name_col).value)
         if not name:
             continue
         out.append({"label": _clean_org_label(label) or "", "name": name})
     return out
+
+
+def _is_organization_label(label: str) -> bool:
+    normalized = " ".join(label.split()).strip().lower()
+    return any(normalized.startswith(p) for p in ORGANIZATION_LABEL_PREFIXES)
 
 
 _LABEL_TRAIL = re.compile(r"\s*[/]\s*.*$")  # strip "/ E-mail" / "/ Last name"
