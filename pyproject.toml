@@ -13,6 +13,7 @@ dependencies = [
     "PHX>=1.56.51",
     "httpx>=0.27",
     "pydantic>=2.9",
+    "judoscale[asgi]>=1.13",
 ]
 
 [dependency-groups]
