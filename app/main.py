@@ -2,6 +2,7 @@
 
 import pathlib
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib.metadata import version as package_version
@@ -11,9 +12,16 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 
+from app import jobs
 from app.auth import log_startup_auth_state, require_auth
 from app.parser import ParseError, available_versions, parse_workbook
 from app.version_detection import DetectionError, detect_version
+
+
+class WorkbookFetchError(Exception):
+    """Fetch/size failure raised off the request path, where HTTPException has
+    no meaning — there is no response to attach a status to."""
+
 
 SCHEMA_VERSION = "1.0.0"
 PARSER_NAME = "ps-phx-parser"
@@ -157,6 +165,24 @@ class ParseResponse(BaseModel):
     project_info: ProjectInfo | None = None
 
 
+class ParseAccepted(BaseModel):
+    """202 body. The parse takes ~46s against a 30s router cap, so /parse hands
+    back a job id immediately and the caller polls /parse/{job_id}."""
+
+    job_id: str
+    status: Literal["pending"] = "pending"
+
+
+class ParseStatus(BaseModel):
+    """GET /parse/{job_id}. ``result`` is populated only when status == "done";
+    ``detail`` carries the reason only when status == "failed"."""
+
+    job_id: str
+    status: Literal["pending", "done", "failed"]
+    detail: str | None = None
+    result: ParseResponse | None = None
+
+
 class WufiParseRequest(BaseModel):
     """Request for the /parse-wufi endpoint. WUFI Passive XML / .wpx files
     don't carry a version stem in the PHPP sense — PHX.from_WUFI_XML picks
@@ -224,35 +250,141 @@ async def detect_version_endpoint(req: DetectVersionRequest) -> DetectVersionRes
     )
 
 
-@app.post(
-    "/parse",
-    response_model=ParseResponse,
-    dependencies=[Depends(require_auth)],
-)
-async def parse(req: ParseRequest) -> ParseResponse:
-    body = await _fetch_workbook(str(req.url))
+# Parses run on a thread pool, NOT as asyncio tasks.
+#
+# Two reasons, and the second is the one that matters. First, the work is
+# CPU-bound openpyxl: on the event loop it would block every other request for
+# ~46s on this service's single uvicorn worker. Second, an asyncio task only
+# progresses while the loop is being serviced — which couples "does the parse
+# run" to "is anything else driving the loop". A thread has no such dependency,
+# so the work completes whether or not another request arrives.
+#
+# max_workers=1 is deliberate: openpyxl holds the whole workbook in memory
+# (~300 MB for a 27 MB file), so two concurrent parses would risk the dyno's
+# memory quota. Parses queue instead. At current volume — a handful of uploads a
+# day — the queue is almost always empty.
+_PARSE_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="phx-parse")
 
-    version = req.phpp_version
-    if version is None:
+
+def _fetch_workbook_sync(url: str) -> bytes:
+    """Blocking fetch, for use inside the parse thread.
+
+    The async `_fetch_workbook` is still used by /detect-version, which is fast
+    enough to stay on the request path.
+    """
+    with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS) as client:
         try:
-            version = detect_version(body).shape_stem
-        except DetectionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            response = client.get(url)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise WorkbookFetchError(f"Failed to fetch workbook: {exc}") from exc
+
+    body = response.content
+    if len(body) > MAX_WORKBOOK_BYTES:
+        raise WorkbookFetchError(
+            f"Workbook exceeds {MAX_WORKBOOK_BYTES} bytes: {len(body)}"
+        )
+    return body
+
+
+def _parse_sync(body: bytes, version_hint: str | None) -> tuple[str, dict]:
+    """The whole CPU-bound half, run in a worker thread.
+
+    BOTH steps open the workbook with openpyxl, so neither may run on the event
+    loop: this service has a single uvicorn worker, and a ~46s parse on the loop
+    makes it unresponsive to /health and every other request for the duration.
+    """
+    version = version_hint or detect_version(body).shape_stem
+    return version, parse_workbook(body, version)
+
+
+def _run_parse(job_id: str, url: str, version_hint: str | None) -> None:
+    """Fetch, parse, and record the outcome against ``job_id``.
+
+    Runs on the parse thread. Never raises: this is detached from any request,
+    so an escaping exception would leave a job stuck `pending` forever rather
+    than producing a response anyone sees. Every exit path writes a terminal
+    status.
+    """
+    try:
+        body = _fetch_workbook_sync(url)
+    except WorkbookFetchError as exc:
+        jobs.fail(job_id, str(exc))
+        return
 
     try:
-        result = parse_workbook(body, version)
-    except ParseError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        version, result = _parse_sync(body, version_hint)
+    except (ParseError, DetectionError) as exc:
+        jobs.fail(job_id, str(exc))
+        return
+    except Exception as exc:
+        jobs.fail(job_id, f"{type(exc).__name__}: {exc}")
+        return
 
-    return ParseResponse(
-        parser=ParserMeta(
-            version=PARSER_VERSION,
-            phpp_version=version,
-            parsed_at=datetime.now(UTC).isoformat(),
-        ),
-        kpis=result.get("kpis"),
-        envelope=result.get("envelope"),
-        project_info=result.get("project_info"),
+    jobs.finish(
+        job_id,
+        ParseResponse(
+            parser=ParserMeta(
+                version=PARSER_VERSION,
+                phpp_version=version,
+                parsed_at=datetime.now(UTC).isoformat(),
+            ),
+            kpis=result.get("kpis"),
+            envelope=result.get("envelope"),
+            project_info=result.get("project_info"),
+        ).model_dump(),
+    )
+
+
+@app.post(
+    "/parse",
+    status_code=202,
+    response_model=ParseAccepted,
+    dependencies=[Depends(require_auth)],
+)
+async def parse(req: ParseRequest) -> ParseAccepted:
+    """Accept a parse and return immediately; poll /parse/{job_id} for the result.
+
+    Asynchronous because a real workbook takes ~46s and Heroku's router caps
+    time-to-first-byte at 30s — see app/jobs.py for the measurement.
+
+    An explicitly-supplied phpp_version is validated HERE rather than in the
+    worker: the check is a list membership with no I/O, and returning 422
+    synchronously keeps an obviously-wrong request a fast error instead of a
+    poll that ends in failure. An auto-detected version cannot be validated this
+    way, since detecting it requires the workbook.
+    """
+    if req.phpp_version is not None and req.phpp_version not in available_versions():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown phpp_version '{req.phpp_version}'. "
+                f"Available: {available_versions()}"
+            ),
+        )
+
+    job_id = jobs.create()
+    _PARSE_POOL.submit(_run_parse, job_id, str(req.url), req.phpp_version)
+    return ParseAccepted(job_id=job_id)
+
+
+@app.get(
+    "/parse/{job_id}",
+    response_model=ParseStatus,
+    dependencies=[Depends(require_auth)],
+)
+async def parse_status(job_id: str) -> ParseStatus:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unknown or expired job_id",
+        )
+    return ParseStatus(
+        job_id=job_id,
+        status=job.status,
+        detail=job.detail,
+        result=job.result,
     )
 
 

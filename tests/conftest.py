@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 
+import time
 from io import BytesIO
 
 import pytest
@@ -233,3 +234,49 @@ def workbook_bytes_with_envelope(shape_en_10_6ip) -> bytes:
 @pytest.fixture
 def workbook_bytes_with_project_info(shape_en_10_6ip) -> bytes:
     return build_workbook_bytes(shape_en_10_6ip, with_project_info=True)
+
+
+# ── Async /parse helpers ────────────────────────────────────────────────────
+#
+# /parse returns 202 + a job id and the work continues on a parse thread, so any
+# test wanting a parsed body has to poll — exactly as the real ps-rails client
+# does. Bounded so a hang fails the suite rather than hanging it.
+POLL_ATTEMPTS = 100
+POLL_INTERVAL_SECONDS = 0.05
+
+
+@pytest.fixture(autouse=True)
+def _clean_job_store():
+    """Job state is process-global, so leaking it between examples would let one
+    test see another's jobs."""
+    from app import jobs
+
+    jobs._reset_for_tests()
+    yield
+    jobs._reset_for_tests()
+
+
+def start_parse(client, url, **payload) -> str:
+    """POST /parse and return the job id, asserting the 202 accept contract."""
+    response = client.post("/parse", json={"url": url, **payload})
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["status"] == "pending"
+    return body["job_id"]
+
+
+def poll_until_settled(client, job_id: str) -> dict:
+    """Poll /parse/{job_id} until it leaves `pending`; return the final body."""
+    for _ in range(POLL_ATTEMPTS):
+        response = client.get(f"/parse/{job_id}")
+        assert response.status_code == 200
+        body = response.json()
+        if body["status"] != "pending":
+            return body
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise AssertionError(f"job {job_id} never settled")
+
+
+def parse_and_wait(client, url, **payload) -> dict:
+    """Start a parse and block until it settles. Returns the settled body."""
+    return poll_until_settled(client, start_parse(client, url, **payload))

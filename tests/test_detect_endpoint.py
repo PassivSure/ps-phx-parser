@@ -3,6 +3,7 @@ import respx
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.conftest import parse_and_wait
 
 client = TestClient(app)
 
@@ -53,10 +54,10 @@ def test_parse_auto_detects_when_phpp_version_omitted(workbook_bytes_with_versio
         return_value=httpx.Response(200, content=workbook_bytes_with_version)
     )
 
-    response = client.post("/parse", json={"url": WORKBOOK_URL})  # no phpp_version
+    settled = parse_and_wait(client, WORKBOOK_URL)  # no phpp_version
 
-    assert response.status_code == 200
-    assert response.json()["parser"]["phpp_version"] == "EN_10_6IP"
+    assert settled["status"] == "done", settled.get("detail")
+    assert settled["result"]["parser"]["phpp_version"] == "EN_10_6IP"
 
 
 @respx.mock
@@ -66,10 +67,13 @@ def test_parse_422_when_auto_detect_fails(workbook_bytes):
         return_value=httpx.Response(200, content=workbook_bytes)
     )
 
-    response = client.post("/parse", json={"url": WORKBOOK_URL})
+    # Auto-detection needs the workbook, so it cannot be validated before the
+    # 202 the way an explicit phpp_version hint can. A detection failure is
+    # therefore a failed job rather than a synchronous 422.
+    settled = parse_and_wait(client, WORKBOOK_URL)
 
-    assert response.status_code == 422
-    assert "No Data" in response.json()["detail"]
+    assert settled["status"] == "failed"
+    assert "No Data" in settled["detail"]
 
 
 @respx.mock
@@ -80,9 +84,7 @@ def test_parse_explicit_version_overrides_detection(workbook_bytes_with_version)
         return_value=httpx.Response(200, content=workbook_bytes_with_version)
     )
 
-    response = client.post(
-        "/parse", json={"url": WORKBOOK_URL, "phpp_version": "EN_10_6"}
-    )
+    settled = parse_and_wait(client, WORKBOOK_URL, phpp_version="EN_10_6")
 
-    assert response.status_code == 200
-    assert response.json()["parser"]["phpp_version"] == "EN_10_6"
+    assert settled["status"] == "done", settled.get("detail")
+    assert settled["result"]["parser"]["phpp_version"] == "EN_10_6"
