@@ -85,5 +85,16 @@ class TestDiscovery:
             "heat_recovery_efficiency_pct", "source",
         }
         for item in read_equipment(wb, "EN_10_6"):
-            assert set(item) <= allowed, set(item) - allowed
+            missing = allowed - set(item)
+            extra = set(item) - allowed
+            assert set(item) == allowed, f"Missing: {missing}, Extra: {extra}"
             assert item["equipment_type"] is not None
+
+    def test_manufacturer_is_never_derived(self):
+        # "Swegon" is a real manufacturer token; a naive split()[0] would emit
+        # it. Verify it is always None, not invented from the name.
+        wb = _wb({"Lueftung_Auswahl_Lueftungsgeraet": "01ud-Swegon Casa R7"})
+        items = read_equipment(wb, "EN_10_6")
+        assert len(items) == 1
+        assert items[0]["name"] == "Swegon Casa R7"
+        assert items[0]["manufacturer"] is None

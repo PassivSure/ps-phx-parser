@@ -2,7 +2,7 @@
 
 Fills the `hvac_equipment` subtree that schema/output.schema.json already
 declares -- ParseResponse's docstring names this slot "P2.4 hvac". The schema
-is strict (additionalProperties: false), so EMITTED_KEYS below is the contract,
+is strict (additionalProperties: false), so the key set in _item() is the contract,
 not a convention.
 
 Scope is PHPP v10.6. The names are stable across the IP and SI editions of a
@@ -44,15 +44,6 @@ def _strip_prefix(text: Any) -> str | None:
     if not isinstance(text, str) or not text.strip():
         return None
     return _PREFIX.sub("", text.strip()) or None
-
-
-def _manufacturer(name: str | None) -> str | None:
-    """The leading token, where one is identifiable. Never invented: a wrong
-    manufacturer on a certifier-facing record is worse than a blank one."""
-    if not name:
-        return None
-    first = name.split()[0].strip()
-    return first or None
 
 
 def _classify_ventilation(humidity_recovery_pct: float | None) -> str:
@@ -109,10 +100,11 @@ def _ventilation(wb: Workbook) -> list[dict[str, Any]]:
     name = _strip_prefix(_first(resolve(wb, source)))
     if name is None:
         return []
+    # Manufacturer is always None; see comment in _cooling. Humidity recovery
+    # (which determines hrv vs erv) arrives in Task 3 from the Components sheet.
     return [_item(
         equipment_type=_classify_ventilation(None),
         name=name,
-        manufacturer=_manufacturer(name),
         source=source,
     )]
 
@@ -124,10 +116,14 @@ def _cooling(wb: Workbook) -> list[dict[str, Any]]:
     name = _strip_prefix(_first(resolve(wb, source)))
     if name is None:
         return []
+    # Manufacturer is always None: any first-token heuristic invents sometimes,
+    # and the available corpus shows half the devices select PHPP generics
+    # (e.g., "Standard air-to-air heat pump"). A wrong manufacturer on a
+    # certifier-facing record is worse than a blank one; the full name still
+    # carries identifying info.
     return [_item(
         equipment_type="cooling_unit",
         name=name,
-        manufacturer=_manufacturer(name),
         source=source,
     )]
 
@@ -144,7 +140,6 @@ def _heat_pumps(wb: Workbook) -> list[dict[str, Any]]:
         out.append(_item(
             equipment_type=equipment_type,
             name=name,
-            manufacturer=_manufacturer(name),
             source=source,
         ))
     return out
