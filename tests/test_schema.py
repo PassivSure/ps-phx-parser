@@ -83,6 +83,37 @@ def test_parse_response_with_all_subtrees_validates(shape_en_10_6ip, schema):
     validate(instance=body, schema=schema)
 
 
+@respx.mock
+def test_parse_response_with_equipment_validates(shape_en_10_6ip, schema):
+    """Live /parse against a fixture with_equipment=True — the populated
+    counterpart to test_parse_response_with_all_subtrees_validates's empty-list
+    assertion. That test proves "no equipment" flows through the endpoint
+    correctly; every other live fixture in this file also yields []. This one
+    proves a populated hvac_equipment item does too, and that it still
+    satisfies additionalProperties: false end-to-end, not just in the
+    hand-built smoke test below."""
+    from tests.conftest import build_workbook_bytes
+
+    body = build_workbook_bytes(
+        shape_en_10_6ip,
+        data_sheet_version="10.6 IP",
+        with_equipment=True,
+    )
+    respx.get(WORKBOOK_URL).mock(return_value=httpx.Response(200, content=body))
+
+    settled = parse_and_wait(client, WORKBOOK_URL)
+    assert settled["status"] == "done", settled.get("detail")
+
+    result = settled["result"]
+    items = result["hvac_equipment"]
+    assert items, "expected a populated hvac_equipment list"
+    vent = next(i for i in items if i["equipment_type"] in ("hrv", "erv"))
+    assert vent["name"] == "Test HRV Unit"
+    assert vent["equipment_type"] == "hrv"
+
+    validate(instance=result, schema=schema)
+
+
 def test_schema_accepts_full_phase2_response(schema):
     """A hand-built response with every Phase-2 subtree populated still validates.
 

@@ -1,8 +1,22 @@
+import json
+import pathlib
+
 import pytest
 from openpyxl import Workbook
 from openpyxl.workbook.defined_name import DefinedName
 
 from app.equipment import _classify_ventilation, _strip_prefix, read_equipment
+
+SCHEMA_PATH = pathlib.Path(__file__).resolve().parent.parent / "schema" / "output.schema.json"
+
+
+def _hvac_equipment_item_allowed_keys() -> set[str]:
+    """The live contract, not a transcription of it. Reading
+    $defs/hvac_equipment_item/properties out of schema/output.schema.json
+    directly means this test checks against the real schema and can't
+    silently drift from a hardcoded copy of its key set."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    return set(schema["$defs"]["hvac_equipment_item"]["properties"])
 
 
 def _wb(names: dict[str, object], sheet: str = "Ventilation SI"):
@@ -79,11 +93,7 @@ class TestDiscovery:
 
     def test_every_emitted_item_uses_only_schema_keys(self):
         wb = _wb({"Lueftung_Auswahl_Lueftungsgeraet": "01ud-Swegon Casa R7"})
-        allowed = {
-            "equipment_type", "name", "manufacturer", "capacity", "capacity_unit",
-            "efficiency_value", "efficiency_type", "airflow_cfm", "airflow_m3h",
-            "heat_recovery_efficiency_pct", "source",
-        }
+        allowed = _hvac_equipment_item_allowed_keys()
         for item in read_equipment(wb, "EN_10_6"):
             missing = allowed - set(item)
             extra = set(item) - allowed
