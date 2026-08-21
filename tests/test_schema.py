@@ -73,6 +73,12 @@ def test_parse_response_with_all_subtrees_validates(shape_en_10_6ip, schema):
     assert body["project_info"]["project_name"] == "Test Passive House"
     assert body["project_info"]["postal_code"] == "94028"
     assert len(body["project_info"]["organizations"]) == 5
+    # Discriminates "wired" from "modeled but never populated": this fixture
+    # names no equipment, so read_equipment resolves an empty list. A
+    # ParseResponse built without threading hvac_equipment through would
+    # leave the field at its None default and pass every other assertion
+    # here, including a schema where the key isn't required.
+    assert body["hvac_equipment"] == []
 
     validate(instance=body, schema=schema)
 

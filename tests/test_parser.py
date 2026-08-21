@@ -60,3 +60,10 @@ def test_parse_workbook_returns_nulls_when_sheets_missing(workbook_bytes):
 def test_parse_workbook_rejects_unknown_version(workbook_bytes):
     with pytest.raises(ParseError, match="Unknown phpp_version"):
         parse_workbook(workbook_bytes, "XX_99_9")
+
+
+def test_parse_workbook_emits_an_hvac_equipment_subtree(workbook_bytes):
+    """Present and a list even when the workbook has no equipment — the
+    consumer distinguishes 'no devices' from 'key missing'."""
+    result = parse_workbook(workbook_bytes, "EN_10_6IP")
+    assert isinstance(result["hvac_equipment"], list)
