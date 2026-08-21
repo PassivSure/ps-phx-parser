@@ -5,6 +5,7 @@ from io import BytesIO
 
 import pytest
 from openpyxl import Workbook
+from openpyxl.workbook.defined_name import DefinedName
 from PHX.PHPP.phpp_localization import shape_model
 
 from app.parser import load_shape
@@ -39,6 +40,7 @@ def build_workbook_bytes(
     cooling_peak_value: float | None = None,
     with_envelope: bool = False,
     with_project_info: bool = False,
+    with_equipment: bool = False,
 ) -> bytes:
     """Build a minimal in-memory PHPP-shaped workbook for tests.
 
@@ -48,6 +50,11 @@ def build_workbook_bytes(
 
     Optionally writes a Data sheet for version-detection tests. Pass
     data_sheet_version='10.6 IP' (or similar) to enable it.
+
+    Optionally writes one equipment defined name (`Lueftung_Auswahl_Lueftungsgeraet`,
+    a ventilation-device selection) — pass with_equipment=True. Exists so at
+    least one live /parse test exercises HvacEquipmentItem against a non-empty
+    list; app.equipment has its own richer synthetic + real-workbook coverage.
 
     Optionally writes the four KPI sheets (Heating, Cooling, Heating load,
     Cooling load, PER) with values from KPI_FIXTURE_VALUES — pass
@@ -208,6 +215,19 @@ def build_workbook_bytes(
         vf_ws[
             f"{use_type.input_column}{use_locator_row + use_type.input_row_offset}"
         ] = "10-Residential building: Residential"
+
+    if with_equipment:
+        # app.equipment reads this defined name directly, not through the
+        # PHX shape -- one cell, one name, is enough to make read_equipment
+        # emit a real (non-empty) hvac_equipment item.
+        eq_ws = wb.create_sheet("Equipment Test")
+        eq_ws["A1"] = "01ud-Test HRV Unit"
+        wb.defined_names.add(
+            DefinedName(
+                "Lueftung_Auswahl_Lueftungsgeraet",
+                attr_text="'Equipment Test'!$A$1",
+            )
+        )
 
     buf = BytesIO()
     wb.save(buf)

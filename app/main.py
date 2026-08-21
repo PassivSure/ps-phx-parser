@@ -182,6 +182,27 @@ class ProjectInfo(BaseModel):
     organizations: list[Organization]
 
 
+class HvacEquipmentItem(BaseModel):
+    """One mechanical device. Mirrors $defs/hvac_equipment_item in
+    schema/output.schema.json, which sets additionalProperties: false — so this
+    model must not grow a field the schema does not have."""
+
+    equipment_type: Literal[
+        "cooling_unit", "hrv", "erv", "heat_pump", "boiler", "dhw",
+        "dhw_heat_pump", "compact",
+    ]
+    name: str | None = None
+    manufacturer: str | None = None
+    capacity: float | None = None
+    capacity_unit: Literal["Btu/h", "W", "kW", "ton"] | None = None
+    efficiency_value: float | None = None
+    efficiency_type: str | None = None
+    airflow_cfm: float | None = None
+    airflow_m3h: float | None = None
+    heat_recovery_efficiency_pct: float | None = None
+    source: str | None = None
+
+
 class ParseResponse(BaseModel):
     """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
     coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
@@ -195,6 +216,7 @@ class ParseResponse(BaseModel):
     kpis: Kpis | None = None
     envelope: Envelope | None = None
     project_info: ProjectInfo | None = None
+    hvac_equipment: list[HvacEquipmentItem] | None = None
 
 
 class ParseAccepted(BaseModel):
@@ -364,6 +386,7 @@ def _run_parse(job_id: str, url: str, version_hint: str | None) -> None:
             kpis=result.get("kpis"),
             envelope=result.get("envelope"),
             project_info=result.get("project_info"),
+            hvac_equipment=result.get("hvac_equipment"),
         ).model_dump(),
     )
 
