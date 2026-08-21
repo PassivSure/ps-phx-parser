@@ -47,9 +47,13 @@ def resolve(wb: Workbook, name: str) -> Any | None:
     took the first cell would be right often enough to pass a casual test and wrong
     wherever the value sits elsewhere in the range -- hence the distinction.
 
-    Returns None rather than raising for every failure mode -- an absent name,
+    Returns None rather than raising for most failure modes -- an absent name,
     a sheet the workbook does not have, an unparseable reference such as #REF!.
-    Equipment is one subtree of five and must never take a parse down with it.
+    NOT caught here: a reference whose row exceeds openpyxl's max of 1048576
+    raises ValueError out of the underlying cell access. Equipment is one
+    subtree of five and must never take a parse down with it, but that guard
+    lives in app.equipment.read_equipment (this function's only caller)
+    rather than here, deliberately.
     """
     defined = wb.defined_names.get(name)
     if defined is None:

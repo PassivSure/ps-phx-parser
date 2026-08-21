@@ -109,11 +109,28 @@ class TestDiscovery:
         assert items[0]["name"] == "Swegon Casa R7"
         assert items[0]["manufacturer"] is None
 
+    def test_a_read_failure_degrades_to_an_empty_list_instead_of_raising(self):
+        # A defined name pointing past openpyxl's row 1048576 makes
+        # app.named_ranges.resolve raise ValueError -- confirmed directly
+        # against named_ranges.resolve in isolation before this test was
+        # written. Equipment is one subtree of five in
+        # app.parser.parse_workbook's single dict-literal return: an
+        # unguarded raise here would take kpis/envelope/project_info down
+        # with it too, violating the plan's Global Constraint that equipment
+        # must never fail a parse.
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Ventilation SI"
+        wb.defined_names.add(DefinedName(
+            "Lueftung_Auswahl_Lueftungsgeraet",
+            attr_text="'Ventilation SI'!$A$1048577",
+        ))
+        assert read_equipment(wb, "EN_10_6") == []
+
 
 class TestVentilationSpec:
     """Column block on the Components sheet:
-    LQ id · LR description · LS heat recovery · LT humidity recovery
-    · LX/LY airflow range.
+    LQ id · LR description (unread) · LS heat recovery · LT humidity recovery.
     """
 
     def _wb_with_components(self, *, row: int, device_id: str):
@@ -162,7 +179,15 @@ class TestVentilationSpec:
         assert item["name"] == "Swegon Casa R7"
 
     def test_absent_components_sheet_leaves_efficiency_null(self):
+        # Total-failure path: no spec row was ever found (as opposed to a
+        # row found with a genuinely blank humidity column). `source` must
+        # disclose that distinction, since `equipment_type` alone can't --
+        # both this case and a real heat-only reading classify as `hrv`.
         wb = self._wb_with_components(row=13, device_id="01ud")
         del wb["Components SI"]
         item = read_equipment(wb, "EN_10_6")[0]
         assert item["heat_recovery_efficiency_pct"] is None
+        assert item["source"] == (
+            "Lueftung_Auswahl_Lueftungsgeraet"
+            "; no heat/humidity recovery values found on the Components sheet"
+        )

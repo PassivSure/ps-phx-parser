@@ -14,6 +14,7 @@ import pathlib
 import pytest
 
 from app.parser import parse_workbook
+from tests.test_equipment import _hvac_equipment_item_allowed_keys
 
 DOWNLOADS = pathlib.Path.home() / "Downloads"
 
@@ -94,12 +95,16 @@ def test_airflow_in_both_units(case):
 
 
 def test_every_item_conforms_to_the_schema_key_set(case):
+    # Two-way, not `<=`: a subset check passes on an item that's missing a
+    # required key, which is exactly the shape of bug this test exists to
+    # catch. `allowed` comes from the schema itself (same helper
+    # test_equipment.py uses), not a second hardcoded copy that could drift
+    # from the real contract. Loops over every emitted item (not `_vent()`'s
+    # hrv/erv-only filter), since that's the only assertion in this file
+    # that ever touches the cooling_unit / heat_pump / dhw_heat_pump items a
+    # real workbook may also emit.
     _, items = case
-    allowed = {
-        "equipment_type", "name", "manufacturer", "capacity", "capacity_unit",
-        "efficiency_value", "efficiency_type", "airflow_cfm", "airflow_m3h",
-        "heat_recovery_efficiency_pct", "source",
-    }
+    allowed = _hvac_equipment_item_allowed_keys()
     assert items, "no equipment extracted"
     for item in items:
-        assert set(item) <= allowed, set(item) - allowed
+        assert set(item) == allowed, set(item) ^ allowed

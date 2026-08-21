@@ -13,12 +13,16 @@ therefore emit nothing rather than guessing.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
+from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
 from app.named_ranges import resolve
+
+logger = logging.getLogger(__name__)
 
 # The v10.6 shapes this module understands. A version outside this set emits
 # nothing -- see the module docstring on why names do not generalise.
@@ -81,23 +85,39 @@ def _vent_sheet(wb: Workbook):
 
 
 def _vent_spec(wb: Workbook, device_id: str | None) -> dict[str, Any]:
-    """Heat and humidity recovery for a device, looked up by its id."""
+    """Heat and humidity recovery for a device, looked up by its id.
+
+    Production opens the workbook `read_only=True` (app/parser.py), and in
+    that mode every individual `ws[coordinate]` access re-parses the sheet
+    from scratch. The old implementation did up to 801 of those (the
+    certified-catalog block) -- fine at ~46s per parse when the device sits
+    early, ruinous (measured 218.5s on the real Holmes file) when it sits
+    late or isn't in the catalog at all. One `iter_rows` pass over the
+    id/heat-recovery/humidity-recovery columns builds a small id->spec dict
+    instead, so the cost is one sheet scan regardless of where -- or
+    whether -- the device is found. Same row ranges, same return shape.
+    """
     blank = {"heat_recovery_pct": None, "humidity_recovery_pct": None}
     ws = _vent_sheet(wb)
     if ws is None or not device_id:
         return blank
 
     rows = _VENT_CERT_ROWS if _is_certified_id(device_id) else _VENT_USER_ROWS
-    for row in rows:
-        try:
-            if ws[f"{_VENT_ID_COL}{row}"].value != device_id:
-                continue
-            return {
-                "heat_recovery_pct": _as_pct(ws[f"{_VENT_HR_COL}{row}"].value),
-                "humidity_recovery_pct": _as_pct(ws[f"{_VENT_HUMIDITY_COL}{row}"].value),
-            }
-        except (KeyError, ValueError, IndexError):
-            return blank
+    try:
+        for id_value, _description, hr_value, humidity_value in ws.iter_rows(
+            min_row=rows.start,
+            max_row=rows.stop - 1,
+            min_col=column_index_from_string(_VENT_ID_COL),
+            max_col=column_index_from_string(_VENT_HUMIDITY_COL),
+            values_only=True,
+        ):
+            if id_value == device_id:
+                return {
+                    "heat_recovery_pct": _as_pct(hr_value),
+                    "humidity_recovery_pct": _as_pct(humidity_value),
+                }
+    except (KeyError, ValueError, IndexError):
+        return blank
     return blank
 
 
@@ -146,15 +166,53 @@ def _item(**kwargs: Any) -> dict[str, Any]:
 
 
 def read_equipment(wb: Workbook, version: str) -> list[dict[str, Any]]:
-    """Every active mechanical device, or [] for an unsupported version."""
+    """Every active mechanical device, or [] for an unsupported version or a
+    read failure.
+
+    Equipment is one subtree of five inside app.parser.parse_workbook's
+    single dict-literal return -- an unguarded raise here loses kpis,
+    envelope and project_info too, not just this subtree, which is exactly
+    what the plan's Global Constraint ("equipment must never fail a parse")
+    rules out. Guarded top to bottom against two verified escapes:
+    app.named_ranges.resolve raising ValueError on a defined name that
+    points past openpyxl's row 1048576, and an item whose equipment_type
+    somehow comes back None -- unreachable via any call site today, but it
+    would raise a pydantic ValidationError downstream in
+    app.main._run_parse and fail the whole job, so it is degraded here
+    before it can leave this function.
+    """
     if version not in SUPPORTED_VERSIONS:
         return []
 
-    items: list[dict[str, Any]] = []
-    items.extend(_ventilation(wb))
-    items.extend(_cooling(wb))
-    items.extend(_heat_pumps(wb))
+    try:
+        items: list[dict[str, Any]] = []
+        items.extend(_ventilation(wb))
+        items.extend(_cooling(wb))
+        items.extend(_heat_pumps(wb))
+        if any(item["equipment_type"] is None for item in items):
+            raise ValueError("an emitted item is missing its required equipment_type")
+    except Exception:
+        logger.exception("[equipment] read_equipment failed; degrading to []")
+        return []
     return items
+
+
+_NO_SPEC_VALUES_NOTE = "; no heat/humidity recovery values found on the Components sheet"
+
+
+def _vent_source(source: str, spec: dict[str, Any]) -> str:
+    """`source` names where the device NAME came from. When both recovery
+    values come back None -- whether because no spec row was found at all
+    (no Components sheet, an unparseable device id, the wrong block, the row
+    simply absent) or because a row WAS found with both columns genuinely
+    blank -- `_classify_ventilation` reports `hrv` on a None humidity
+    reading, indistinguishable from a real heat-only reading (row found,
+    heat recovery present, only humidity blank) unless `source` discloses
+    it. Worded to be true in either underlying case, not just the first.
+    """
+    if spec["heat_recovery_pct"] is None and spec["humidity_recovery_pct"] is None:
+        return f"{source}{_NO_SPEC_VALUES_NOTE}"
+    return source
 
 
 def _ventilation(wb: Workbook) -> list[dict[str, Any]]:
@@ -175,7 +233,7 @@ def _ventilation(wb: Workbook) -> list[dict[str, Any]]:
         heat_recovery_efficiency_pct=spec["heat_recovery_pct"],
         airflow_m3h=airflow_m3h,
         airflow_cfm=None if airflow_m3h is None else airflow_m3h * M3H_TO_CFM,
-        source=source,
+        source=_vent_source(source, spec),
     )]
 
 
