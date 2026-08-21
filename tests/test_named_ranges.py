@@ -1,4 +1,3 @@
-# frozen_string_literal equivalent not needed in Python
 from openpyxl import Workbook
 from openpyxl.workbook.defined_name import DefinedName
 
@@ -47,3 +46,27 @@ def test_multi_cell_that_is_entirely_empty_returns_none():
     wb["Ventilation SI"]["K91"] = None
     wb["Ventilation SI"]["M91"] = None
     assert resolve(wb, "multi") is None
+
+
+def test_range_with_single_populated_cell_returns_list_not_scalar():
+    # The return shape is keyed on reference syntax (presence of `:` in the reference),
+    # not on how many cells contain data. A range reference with one populated cell
+    # must return a one-element list, not the scalar.
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Test"
+    ws["B4"] = 42.0
+    ws["B5"] = None
+    wb.defined_names.add(DefinedName("single_populated", attr_text="'Test'!$B$4:$B$5"))
+    assert resolve(wb, "single_populated") == [42.0]
+
+
+def test_degenerate_range_reference_returns_list():
+    # A degenerate range reference like $B$4:$B$4 (same cell on both sides)
+    # is still a range syntactically and must return a list, not the scalar.
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Test"
+    ws["B4"] = 100.5
+    wb.defined_names.add(DefinedName("degenerate", attr_text="'Test'!$B$4:$B$4"))
+    assert resolve(wb, "degenerate") == [100.5]
