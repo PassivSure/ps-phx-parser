@@ -117,6 +117,15 @@ def _vent_spec(wb: Workbook, device_id: str | None) -> dict[str, Any]:
                     "humidity_recovery_pct": _as_pct(humidity_value),
                 }
     except (KeyError, ValueError, IndexError):
+        # Log before degrading. This sits inside _ventilation, so it pre-empts
+        # read_equipment's outer guard -- the only other place that logs -- and
+        # a silent blank here is indistinguishable from an honest not-found:
+        # both route through _classify_ventilation(None) to `hrv`.
+        logger.warning(
+            "Ventilation spec lookup failed for device %r; treating as not found",
+            device_id,
+            exc_info=True,
+        )
         return blank
     return blank
 
