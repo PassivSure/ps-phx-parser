@@ -98,3 +98,61 @@ class TestDiscovery:
         assert len(items) == 1
         assert items[0]["name"] == "Swegon Casa R7"
         assert items[0]["manufacturer"] is None
+
+
+class TestVentilationSpec:
+    """Column block on the Components sheet:
+    LQ id · LR description · LS heat recovery · LT humidity recovery
+    · LX/LY airflow range.
+    """
+
+    def _wb_with_components(self, *, row: int, device_id: str):
+        wb = Workbook()
+        vent = wb.active
+        vent.title = "Ventilation SI"
+        vent["A2"] = f"{device_id}-Swegon Casa R7"
+        wb.defined_names.add(
+            DefinedName("Lueftung_Auswahl_Lueftungsgeraet",
+                        attr_text="'Ventilation SI'!$A$2"))
+        vent["A3"] = 306.924
+        wb.defined_names.add(
+            DefinedName("Lueftung_Auslegungsvolumenstrom",
+                        attr_text="'Ventilation SI'!$A$3"))
+
+        comp = wb.create_sheet("Components SI")
+        comp[f"LQ{row}"] = device_id
+        comp[f"LS{row}"] = 0.86
+        comp[f"LT{row}"] = 0.86
+        return wb
+
+    def test_finds_a_user_defined_unit_in_the_user_block(self):
+        wb = self._wb_with_components(row=13, device_id="01ud")
+        item = read_equipment(wb, "EN_10_6")[0]
+        assert item["heat_recovery_efficiency_pct"] == pytest.approx(86.0)
+        assert item["equipment_type"] == "erv"
+
+    def test_finds_a_certified_unit_in_the_catalog_block(self):
+        # The guard: searching only the catalog passes this and fails the one
+        # above, which is the commoner case in real projects.
+        wb = self._wb_with_components(row=164, device_id="1363vs03")
+        item = read_equipment(wb, "EN_10_6")[0]
+        assert item["heat_recovery_efficiency_pct"] == pytest.approx(86.0)
+
+    def test_emits_both_airflow_units_from_one_metric_read(self):
+        wb = self._wb_with_components(row=13, device_id="01ud")
+        item = read_equipment(wb, "EN_10_6")[0]
+        assert item["airflow_m3h"] == pytest.approx(306.924)
+        assert item["airflow_cfm"] == pytest.approx(180.65, abs=0.01)
+
+    def test_missing_spec_row_leaves_efficiency_null_without_raising(self):
+        wb = self._wb_with_components(row=13, device_id="01ud")
+        del wb["Components SI"]["LS13"]
+        item = read_equipment(wb, "EN_10_6")[0]
+        assert item["heat_recovery_efficiency_pct"] is None
+        assert item["name"] == "Swegon Casa R7"
+
+    def test_absent_components_sheet_leaves_efficiency_null(self):
+        wb = self._wb_with_components(row=13, device_id="01ud")
+        del wb["Components SI"]
+        item = read_equipment(wb, "EN_10_6")[0]
+        assert item["heat_recovery_efficiency_pct"] is None

@@ -58,6 +58,68 @@ def _classify_ventilation(humidity_recovery_pct: float | None) -> str:
     return "erv" if humidity_recovery_pct > 0 else "hrv"
 
 
+# The ventilation unit block on the Components sheet. Column letters are stable
+# across the two editions; only the sheet name differs, and the named ranges
+# already resolve to the metric one.
+_VENT_SHEETS = ("Components SI", "Components")
+_VENT_ID_COL = "LQ"
+_VENT_HR_COL = "LS"
+_VENT_HUMIDITY_COL = "LT"
+
+# Two blocks, chosen by the device's id prefix. `NNud` is user-defined and sits
+# in the user block; `NNNNvsNN` is a certified catalog entry. Searching only the
+# catalog resolves certified units and silently misses every user-defined one.
+_VENT_USER_ROWS = range(13, 114)
+_VENT_CERT_ROWS = range(114, 915)
+
+
+def _vent_sheet(wb: Workbook):
+    for name in _VENT_SHEETS:
+        if name in wb.sheetnames:
+            return wb[name]
+    return None
+
+
+def _vent_spec(wb: Workbook, device_id: str | None) -> dict[str, Any]:
+    """Heat and humidity recovery for a device, looked up by its id."""
+    blank = {"heat_recovery_pct": None, "humidity_recovery_pct": None}
+    ws = _vent_sheet(wb)
+    if ws is None or not device_id:
+        return blank
+
+    rows = _VENT_CERT_ROWS if _is_certified_id(device_id) else _VENT_USER_ROWS
+    for row in rows:
+        try:
+            if ws[f"{_VENT_ID_COL}{row}"].value != device_id:
+                continue
+            return {
+                "heat_recovery_pct": _as_pct(ws[f"{_VENT_HR_COL}{row}"].value),
+                "humidity_recovery_pct": _as_pct(ws[f"{_VENT_HUMIDITY_COL}{row}"].value),
+            }
+        except (KeyError, ValueError, IndexError):
+            return blank
+    return blank
+
+
+def _is_certified_id(device_id: str) -> bool:
+    """`1363vs03` is a catalog entry; `01ud` is user-defined."""
+    return "ud" not in device_id
+
+
+def _as_pct(value: Any) -> float | None:
+    """PHPP stores these as a fraction (0.86); the schema wants a percentage."""
+    if not isinstance(value, (int, float)):
+        return None
+    return float(value) * 100.0
+
+
+def _device_id(raw: Any) -> str | None:
+    """The id prefix of a dropdown member: '01ud-Swegon…' -> '01ud'."""
+    if not isinstance(raw, str) or "-" not in raw:
+        return None
+    return raw.split("-", 1)[0].strip() or None
+
+
 def _flag_set(wb: Workbook, name: str) -> bool:
     """PHPP marks an active device with an 'x' in an _Ankreuzen range."""
     value = _first(resolve(wb, name))
@@ -97,16 +159,28 @@ def read_equipment(wb: Workbook, version: str) -> list[dict[str, Any]]:
 
 def _ventilation(wb: Workbook) -> list[dict[str, Any]]:
     source = "Lueftung_Auswahl_Lueftungsgeraet"
-    name = _strip_prefix(_first(resolve(wb, source)))
+    raw = _first(resolve(wb, source))
+    name = _strip_prefix(raw)
     if name is None:
         return []
-    # Manufacturer is always None; see comment in _cooling. Humidity recovery
-    # (which determines hrv vs erv) arrives in Task 3 from the Components sheet.
+
+    spec = _vent_spec(wb, _device_id(raw))
+    airflow_m3h = _as_float(_first(resolve(wb, "Lueftung_Auslegungsvolumenstrom")))
+
+    # Manufacturer is always None; see comment in _cooling -- that ruling holds
+    # here too, so it is deliberately absent from this call, not forgotten.
     return [_item(
-        equipment_type=_classify_ventilation(None),
+        equipment_type=_classify_ventilation(spec["humidity_recovery_pct"]),
         name=name,
+        heat_recovery_efficiency_pct=spec["heat_recovery_pct"],
+        airflow_m3h=airflow_m3h,
+        airflow_cfm=None if airflow_m3h is None else airflow_m3h * M3H_TO_CFM,
         source=source,
     )]
+
+
+def _as_float(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 def _cooling(wb: Workbook) -> list[dict[str, Any]]:
