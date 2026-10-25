@@ -337,7 +337,8 @@ def _rating(rows: dict[int, tuple], start: int) -> dict[str, Any] | None:
         if capacity is None or cop is None or capacity <= 0 or cop <= 0:
             continue
         if best is None or capacity > best["capacity"]:
-            best = {"point": n + 1, "source": source, "sink": sink, "capacity": capacity, "cop": cop}
+            best = {"point": n + 1, "source": source, "sink": sink,
+                    "capacity": capacity, "cop": cop}
     return best
 
 

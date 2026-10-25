@@ -6,7 +6,6 @@ its real rows, so a row offset that drifts fails here rather than only on the
 real-workbook suite (which skips when the files are absent).
 """
 
-import pytest
 from openpyxl import Workbook
 from openpyxl.workbook.defined_name import DefinedName
 
@@ -25,6 +24,11 @@ NAMED_CELLS = {
 # section -> first test-point row
 TABLE_ROWS = {"water": 27, "air": 50, "dhw": 84}
 
+AIR_SELECTION = "WP_Heizungssystem_Auswahl_Luft_Luft_WP"
+WATER_SELECTION = "WP_Heizung_Auswahl_Waermepumpe"
+STANDARD_AIR = "99ud-Standard air-to-air heat pump"
+STANDARD_WATER = "96ud-Standard air/water heat pump"
+
 
 def _hp_wb(*, sheet="HP SI", values=None, tables=None, unit="kW", label="Test point 1"):
     wb = Workbook()
@@ -40,7 +44,8 @@ def _hp_wb(*, sheet="HP SI", values=None, tables=None, unit="kW", label="Test po
         for i, (source, sink, capacity, cop) in enumerate(points):
             row = start + i
             ws[f"AC{row}"] = label if i == 0 else f"Test point {i + 1}"
-            ws[f"AD{row}"], ws[f"AE{row}"], ws[f"AF{row}"], ws[f"AG{row}"] = source, sink, capacity, cop
+            for col, value in zip("DEFG", (source, sink, capacity, cop), strict=True):
+                ws[f"A{col}{row}"] = value
     return wb
 
 
@@ -56,7 +61,7 @@ def _of(items, equipment_type):
 class TestAirToAir:
     def test_reads_the_largest_capacity_and_the_cop_at_that_point(self):
         wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                            "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "99ud-Standard air-to-air heat pump"},
+                            AIR_SELECTION: STANDARD_AIR},
                     tables={"air": AIR})
         [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
         assert hp["name"] == "Standard air-to-air heat pump"
@@ -65,14 +70,14 @@ class TestAirToAir:
         assert hp["source"].startswith("WP_Heizungssystem_Auswahl_Luft_Luft_WP; test point 1")
 
     def test_a_selection_whose_box_is_not_ticked_is_not_emitted(self):
-        wb = _hp_wb(values={"WP_Heizungssystem_Auswahl_Luft_Luft_WP": "99ud-Standard air-to-air heat pump"},
+        wb = _hp_wb(values={AIR_SELECTION: STANDARD_AIR},
                     tables={"air": AIR})
         assert _of(read_equipment(wb, "EN_10_6IP"), "heat_pump") == []
 
     def test_skips_zero_and_error_cells_when_picking_the_point(self):
         points = [(0, 60, 0, 2.18), (10, 21, "#VALUE!", 4.9), (20, 60, 1.6, 2.84)]
         wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                            "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "01ud-Unit"},
+                            AIR_SELECTION: "01ud-Unit"},
                     tables={"air": points})
         [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
         assert (hp["capacity"], hp["efficiency_value"]) == (1.6, 2.84)
@@ -80,7 +85,7 @@ class TestAirToAir:
 
     def test_an_empty_table_keeps_the_unit_with_no_figures(self):
         wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                            "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "01ud-Unit"})
+                            AIR_SELECTION: "01ud-Unit"})
         [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
         assert hp["capacity"] is None and hp["efficiency_value"] is None
         assert hp["capacity_unit"] is None and hp["efficiency_type"] is None
@@ -92,7 +97,7 @@ class TestLabelCheck:
 
     def test_a_table_not_labelled_test_point_1_reads_nothing(self):
         wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                            "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "01ud-Unit"},
+                            AIR_SELECTION: "01ud-Unit"},
                     tables={"air": AIR}, label="Something else")
         [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
         assert hp["capacity"] is None
@@ -100,7 +105,7 @@ class TestLabelCheck:
 
     def test_a_table_not_in_kw_reads_nothing(self):
         wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                            "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "01ud-Unit"},
+                            AIR_SELECTION: "01ud-Unit"},
                     tables={"air": AIR}, unit="kBTU/hr")
         [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
         assert hp["capacity"] is None
@@ -124,7 +129,7 @@ class TestDhw:
 class TestWaterBased:
     def test_reads_a_ticked_water_based_heat_pump(self):
         wb = _hp_wb(sheet="HP", values={"WP_Heizung_ankreuzen": "x",
-                                        "WP_Heizung_Auswahl_Waermepumpe": "96ud-Standard air/water heat pump"},
+                                        WATER_SELECTION: STANDARD_WATER},
                     tables={"water": WATER})
         [hp] = _of(read_equipment(wb, "EN_10_6"), "heat_pump")
         assert hp["name"] == "Standard air/water heat pump"
@@ -132,7 +137,7 @@ class TestWaterBased:
         assert hp["source"].startswith("WP_Heizung_Auswahl_Waermepumpe")
 
     def test_an_unticked_water_based_selection_is_not_emitted(self):
-        wb = _hp_wb(values={"WP_Heizung_Auswahl_Waermepumpe": "96ud-Standard air/water heat pump"},
+        wb = _hp_wb(values={WATER_SELECTION: STANDARD_WATER},
                     tables={"water": WATER})
         assert read_equipment(wb, "EN_10_6IP") == []
 
@@ -142,7 +147,7 @@ def test_reads_the_sheet_the_selection_name_points_at():
     COP multiplied by 3.412. Reading anything but the named sheet would bring
     that back."""
     wb = _hp_wb(values={"WP_LuftLuft_ankreuzen": "x",
-                        "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "01ud-Unit"},
+                        AIR_SELECTION: "01ud-Unit"},
                 tables={"air": AIR})
     ip = wb.create_sheet("HP")
     ip["AC50"], ip["AF50"], ip["AG50"] = "Test point 1", 62.65, 16.38
