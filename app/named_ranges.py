@@ -85,3 +85,20 @@ def resolve(wb: Workbook, name: str) -> Any | None:
         if cell.value is not None
     ]
     return values or None
+
+
+def sheet_of(wb: Workbook, name: str) -> str | None:
+    """The sheet a defined name points at, or None.
+
+    For cells PHPP gives no name of their own but places beside a named one --
+    the HP sheet's test-point tables sit next to the named unit selections.
+    Reading them from this sheet keeps them on the same pane as the name: the
+    metric 'HP SI' on an IP workbook, 'HP' on an SI one.
+    """
+    defined = wb.defined_names.get(name)
+    if defined is None:
+        return None
+    match = _REF.match(str(defined.value).strip())
+    if match is None or match.group(1) not in wb.sheetnames:
+        return None
+    return match.group(1)

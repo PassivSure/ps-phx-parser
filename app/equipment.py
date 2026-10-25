@@ -20,7 +20,7 @@ from typing import Any
 from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
-from app.named_ranges import resolve
+from app.named_ranges import resolve, sheet_of
 
 logger = logging.getLogger(__name__)
 
@@ -269,18 +269,110 @@ def _cooling(wb: Workbook) -> list[dict[str, Any]]:
     )]
 
 
+# Heat pumps: (selection name, its "x" box, emitted type). The box gates the
+# unit because the dropdown keeps its value when the box is cleared, and the
+# test-point table beside it stays filled in (the PHI 10.6 IP example has a
+# water-based unit selected, unticked, with a full table).
+_HEAT_PUMPS = (
+    ("WP_Heizung_Auswahl_Waermepumpe", "WP_Heizung_ankreuzen", "heat_pump"),
+    ("WP_Heizungssystem_Auswahl_Luft_Luft_WP", "WP_LuftLuft_ankreuzen", "heat_pump"),
+    ("WP_Warmwassersystem_Auswahl_WP", "WP_WWseparat_ankreuzen", "dhw_heat_pump"),
+)
+
+# Each selection's test-point table: the unit's own catalogue figures, which
+# PHPP copies beside the selection, at fixed rows (the same in the 10.6 IP,
+# 10.6 SI and easyPH files checked). No defined name covers them, so they are
+# read by row from the selection's own sheet, and only when the first row is
+# labelled "Test point 1" and the unit row above it says kW -- a layout that
+# moved reads nothing rather than the wrong row.
+_HP_TABLES = {
+    "WP_Heizung_Auswahl_Waermepumpe": 27,
+    "WP_Heizungssystem_Auswahl_Luft_Luft_WP": 50,
+    "WP_Warmwassersystem_Auswahl_WP": 84,
+}
+_HP_TEST_POINTS = 8
+_HP_FIRST_COL = "AC"   # AC label, AD source °C, AE sink °C, AF capacity kW, AG COP
+_HP_LAST_COL = "AG"
+_HP_TABLES_FIRST_ROW = min(_HP_TABLES.values()) - 1
+_HP_TABLES_LAST_ROW = max(_HP_TABLES.values()) + _HP_TEST_POINTS - 1
+
+_NO_TEST_POINTS_NOTE = "; test points not found beside the selection"
+
+
+def _hp_rows(wb: Workbook, sheet: str | None) -> dict[int, tuple]:
+    """Rows AC:AG of every table on +sheet+, in one read (see _vent_spec on
+    why per-cell access is ruinous in read-only mode)."""
+    if sheet is None:
+        return {}
+    rows = wb[sheet].iter_rows(
+        min_row=_HP_TABLES_FIRST_ROW, max_row=_HP_TABLES_LAST_ROW,
+        min_col=column_index_from_string(_HP_FIRST_COL),
+        max_col=column_index_from_string(_HP_LAST_COL),
+        values_only=True,
+    )
+    return dict(enumerate(rows, start=_HP_TABLES_FIRST_ROW))
+
+
+def _table_found(rows: dict[int, tuple], start: int) -> bool:
+    label = (rows.get(start) or (None,) * 5)[0]
+    unit = (rows.get(start - 1) or (None,) * 5)[3]
+    return label == "Test point 1" and unit == "kW"
+
+
+def _rating(rows: dict[int, tuple], start: int) -> dict[str, Any] | None:
+    """The test point with the largest heating capacity, and the COP there --
+    the rule ps-rails' extraction prompt gives -- or None when the table is
+    missing, mislabelled or empty.
+
+    Metric only: the IP pane beside it shows the COP multiplied by 3.412
+    (the W to Btu/h factor), which is what an IP-pane read reports as COP.
+    """
+    if not _table_found(rows, start):
+        return None
+
+    best = None
+    for n in range(_HP_TEST_POINTS):
+        _label, source, sink, capacity, cop = rows.get(start + n) or (None,) * 5
+        capacity, cop = _as_float(capacity), _as_float(cop)
+        if capacity is None or cop is None or capacity <= 0 or cop <= 0:
+            continue
+        if best is None or capacity > best["capacity"]:
+            best = {"point": n + 1, "source": source, "sink": sink,
+                    "capacity": capacity, "cop": cop}
+    return best
+
+
+def _hp_source(selection: str, rating: dict[str, Any] | None, table_found: bool) -> str:
+    if rating is not None:
+        return (f"{selection}; test point {rating['point']} "
+                f"({rating['source']} °C source, {rating['sink']} °C sink)")
+    return selection if table_found else f"{selection}{_NO_TEST_POINTS_NOTE}"
+
+
 def _heat_pumps(wb: Workbook) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for source, equipment_type in (
-        ("WP_Heizungssystem_Auswahl_Luft_Luft_WP", "heat_pump"),
-        ("WP_Warmwassersystem_Auswahl_WP", "dhw_heat_pump"),
-    ):
-        name = _strip_prefix(_first(resolve(wb, source)))
+    tables: dict[str | None, dict[int, tuple]] = {}
+    for selection, box, equipment_type in _HEAT_PUMPS:
+        if not _flag_set(wb, box):
+            continue
+        name = _strip_prefix(_first(resolve(wb, selection)))
         if name is None:
             continue
+
+        sheet = sheet_of(wb, selection)
+        if sheet not in tables:
+            tables[sheet] = _hp_rows(wb, sheet)
+        rows = tables[sheet]
+        start = _HP_TABLES[selection]
+        rating = _rating(rows, start)
+
         out.append(_item(
             equipment_type=equipment_type,
             name=name,
-            source=source,
+            capacity=rating and rating["capacity"],
+            capacity_unit=rating and "kW",
+            efficiency_value=rating and rating["cop"],
+            efficiency_type=rating and "COP",
+            source=_hp_source(selection, rating, _table_found(rows, start)),
         ))
     return out

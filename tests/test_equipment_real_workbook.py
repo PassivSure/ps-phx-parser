@@ -108,3 +108,49 @@ def test_every_item_conforms_to_the_schema_key_set(case):
     assert items, "no equipment extracted"
     for item in items:
         assert set(item) == allowed, set(item) ^ allowed
+
+
+# Heat-pump capacity (kW) and COP, read by hand off each file's metric HP pane
+# ('HP SI' on an IP workbook): the test point with the largest capacity. The
+# IP pane of the same files shows the COP x 3.412 (16.38 for 6840's 4.8), which
+# is what an IP-pane read reports.
+HEAT_PUMPS = {
+    "6840_ip": ("260309 PHPP 6840 E ^th Ave Pkwy v 10.6.xlsx", "EN_10_6IP", {
+        ("heat_pump", "Standard air-to-air heat pump"): (18.36, 4.8),
+        ("dhw_heat_pump", "Standard DHW HP"): (7.44, 3.0),
+    }),
+    "phi_10_6_ip_example": ("PHPP_V10.6_IP_Example.xlsx", "EN_10_6IP", {
+        # Its water-based unit is selected but not ticked, and its table is
+        # filled in anyway: not emitted.
+        ("heat_pump", "Minisplit classroom"): (1.08, 4.56),
+    }),
+    "easyph_example": ("PHPP_EN_V10.6_easyPH_Example.xlsx", "EN_10_6", {
+        ("heat_pump", "Standard air/water heat pump"): (5.0, 4.3),
+        ("dhw_heat_pump", "Standard air/water heat pump"): (5.0, 4.3),
+    }),
+    "holmes_si": ("2536 Holmes_easyPH_260512.xlsx", "EN_10_6", {
+        # Its heating is a combined ventilation unit (93ud), a table this
+        # reader does not read yet.
+        ("dhw_heat_pump", "HPWH"): (1.6, 2.84),
+    }),
+}
+
+
+@pytest.fixture(scope="module", params=sorted(HEAT_PUMPS), ids=sorted(HEAT_PUMPS))
+def heat_pump_case(request):
+    file, version, expected = HEAT_PUMPS[request.param]
+    path = DOWNLOADS / file
+    if not path.is_file():
+        pytest.skip(f"fixture not found at {path}")
+    items = parse_workbook(path.read_bytes(), version)["hvac_equipment"]
+    return expected, [i for i in items if i["equipment_type"] in ("heat_pump", "dhw_heat_pump")]
+
+
+def test_heat_pump_capacity_and_cop(heat_pump_case):
+    expected, items = heat_pump_case
+    got = {(i["equipment_type"], i["name"]): (i["capacity"], i["efficiency_value"]) for i in items}
+    assert set(got) == set(expected)
+    for key, (capacity, cop) in expected.items():
+        assert got[key][0] == pytest.approx(capacity, abs=0.01), key
+        assert got[key][1] == pytest.approx(cop, abs=0.01), key
+    assert all(i["capacity_unit"] == "kW" and i["efficiency_type"] == "COP" for i in items)
