@@ -157,3 +157,23 @@ def test_split_assembly_ref():
     assert split_assembly_ref("1363vs03-Brink - Flair") == ("1363vs03", "Brink - Flair")
     assert split_assembly_ref("Wall") == (None, None)
     assert split_assembly_ref(None) == (None, None)
+
+
+def test_a_layers_name_of_the_wrong_shape_is_not_read():
+    """The names come from the upload. One pointing at a whole column would
+    size the read; the block is skipped instead."""
+    wb = _donovan_like()
+    del wb.defined_names["U_Werte_Bauteil_1_Teilflaechen"]
+    _name(wb, "U_Werte_Bauteil_1_Teilflaechen", f"'{U_SHEET}'!$L$13:$Q$1048576")
+    [a] = read_assemblies(wb, [_surface("02ud-Wall 1- Basement", 100.0)])
+    assert a["layers"] == [] and a["u_value_w_m2k"] == 0.1542  # the table still reads
+
+
+def test_a_failed_read_emits_no_assemblies(monkeypatch):
+    import app.assemblies as assemblies
+
+    def boom(*_):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(assemblies, "_components_table", boom)
+    assert read_assemblies(_donovan_like(), [_surface("02ud-Wall 1- Basement", 100.0)]) == []

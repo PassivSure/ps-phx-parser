@@ -58,6 +58,7 @@ _BLOCK_ID_LABEL = "assembly no."
 _TABLE_HEADING = "PHPP_Komponenten_Ueberschrift_Bauteilaufbauten"
 _TABLE_ROWS = 600  # ud rows, then PHPP's own catalogue
 _TABLE_LABELS = ("id", "building assembly", "total thickness", "u-value")
+_MAX_HEADING_ROW = 50  # E8 on v10, A10 on v9.7
 
 # Tolerance for the U a block computes against the one the Components table
 # lists for the same id. They are the same figure in two places.
@@ -66,7 +67,16 @@ _U_AGREE = 1e-6
 
 def read_assemblies(wb: Workbook, surfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One entry per assembly a surface uses, in first-use order. [] when no
-    surface names one."""
+    surface names one, or when the read fails: the envelope is one subtree of
+    the parse, and a workbook this misreads must not take the rest with it."""
+    try:
+        return _read(wb, surfaces)
+    except Exception:
+        logger.exception("[assemblies] read failed; emitting no assemblies")
+        return []
+
+
+def _read(wb: Workbook, surfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
     used: dict[str, dict[str, Any]] = {}
     for surface in surfaces:
         assembly_id, name = split_assembly_ref(surface.get("assembly_id_raw"))
@@ -149,6 +159,9 @@ def _components_table(wb: Workbook) -> dict[str, dict[str, Any]]:
     if ref is None:
         return {}
     sheet, first_col, heading_row = ref
+    if heading_row > _MAX_HEADING_ROW or first_col > _GRID_COLS:
+        logger.warning("[assemblies] %s points outside the table's usual place", _TABLE_HEADING)
+        return {}
     ws = wb[sheet]
     rows = list(ws.iter_rows(min_row=heading_row, max_row=heading_row + _TABLE_ROWS,
                              min_col=first_col, max_col=first_col + 10, values_only=True))
@@ -202,7 +215,8 @@ def _blocks(wb: Workbook) -> dict[str, dict[str, Any]]:
     for n in range(1, MAX_BLOCKS + 1):
         name_ref = _ref(wb, _BLOCK_NAME.format(n=n))
         layers_ref = _ref(wb, _BLOCK_LAYERS.format(n=n), whole=True)
-        if name_ref is not None and layers_ref is not None and name_ref[0] == layers_ref[0]:
+        if name_ref is not None and layers_ref is not None and name_ref[0] == layers_ref[0] \
+                and _expected_layers(name_ref, layers_ref):
             refs.append((n, name_ref, layers_ref))
     if not refs:
         return {}
@@ -222,6 +236,24 @@ def _blocks(wb: Workbook) -> dict[str, dict[str, Any]]:
 
 
 _GRID_COLS = 26  # A..Z covers every block column in v9.7 and v10
+
+# The defined names come from the uploaded workbook, so a block is read only
+# when its names have the shape PHPP gives them: eight layer rows of three
+# material/λ pairs, within the rows 60 blocks occupy (block 60 ends near row
+# 1,280 in v9.7 and v10). A name pointing anywhere else -- or at a whole
+# column -- skips the block rather than sizing the read.
+_LAYER_ROWS = 8
+_LAYER_COLS = 6
+_MAX_SHEET_ROW = 1_400
+_MAX_NAMED_CELLS = 8
+
+
+def _expected_layers(name_ref, layers_ref) -> bool:
+    _, c1, r1, c2, r2 = layers_ref
+    _, name_col, name_row = name_ref
+    return (r2 - r1 + 1 == _LAYER_ROWS and c2 - c1 + 1 == _LAYER_COLS
+            and c2 <= _GRID_COLS and name_col <= _GRID_COLS
+            and 1 < name_row < r1 and r2 <= _MAX_SHEET_ROW)
 
 
 class _Grid:
@@ -244,6 +276,8 @@ class _Grid:
         if ref is None:
             return []
         _, c1, r1, c2, r2 = ref
+        if (r2 - r1 + 1) * (c2 - c1 + 1) > _MAX_NAMED_CELLS:
+            return []
         return [self.cell(r, c) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)]
 
 
