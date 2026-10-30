@@ -75,6 +75,10 @@
           "type": "array",
           "items": { "$ref": "#/$defs/envelope_component" }
         },
+        "assemblies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envelope_assembly" }
+        },
         "airtightness": {
           "type": "object",
           "additionalProperties": false,
@@ -189,7 +193,57 @@
           "description": "For thermal bridges only."
         },
         "source_area": { "type": "string" },
-        "source_u_value": { "type": "string" }
+        "source_u_value": { "type": "string" },
+        "assembly_id": {
+          "type": ["string", "null"],
+          "description": "Opaque surfaces: the id of the assembly it uses (\"01ud\"), the key into envelope.assemblies. Null when the surface names none."
+        }
+      }
+    },
+    "envelope_assembly": {
+      "type": "object",
+      "description": "One assembly the Areas surfaces use, transcribed from the metric pane: no R, no unit conversion.",
+      "required": ["id", "name", "layers"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "PHPP assembly id, e.g. \"01ud\"." },
+        "name": { "type": ["string", "null"] },
+        "component": {
+          "type": ["string", "null"],
+          "enum": ["wall", "roof", "slab_on_grade", "door", null],
+          "description": "The type covering most of its area; null when every surface using it is in a group with no type (14, temperature zone X)."
+        },
+        "groups": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "Areas group numbers of the surfaces that use it."
+        },
+        "area_ft2": { "type": ["number", "null"], "description": "Sum over the surfaces that use it; null when one has no area." },
+        "surface_count": { "type": "integer" },
+        "u_value_w_m2k": { "type": ["number", "null"], "description": "From the Components sheet's building-assemblies table." },
+        "total_thickness_mm": { "type": ["number", "null"] },
+        "section_2_fraction": { "type": ["number", "null"], "description": "Share of area section 2 (e.g. studs), 0-1." },
+        "section_3_fraction": { "type": ["number", "null"] },
+        "layers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envelope_assembly_layer" },
+          "description": "From its U-values block, in sheet order; [] for an assembly with none (PHPP's built-in ones)."
+        },
+        "source_u_value": { "type": ["string", "null"] },
+        "source_layers": { "type": ["string", "null"] }
+      }
+    },
+    "envelope_assembly_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thickness_mm": { "type": ["number", "null"] },
+        "material": { "type": ["string", "null"] },
+        "conductivity_w_mk": { "type": ["number", "null"] },
+        "section_2_material": { "type": ["string", "null"] },
+        "section_2_conductivity_w_mk": { "type": ["number", "null"] },
+        "section_3_material": { "type": ["string", "null"] },
+        "section_3_conductivity_w_mk": { "type": ["number", "null"] }
       }
     },
     "hvac_equipment_item": {
