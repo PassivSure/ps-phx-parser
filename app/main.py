@@ -141,7 +141,8 @@ class Kpis(BaseModel):
 class EnvelopeComponent(BaseModel):
     """One opaque surface (wall/roof/floor/door) or thermal bridge. P2.3
     emits component/label/area_ft2 for opaques and label/length/psi for
-    thermal bridges. U/R-values come from the R-Values lookup in P2.3.b."""
+    thermal bridges. An opaque surface's U-value is its assembly's
+    (``assembly_id`` into Envelope.assemblies)."""
 
     component: str
     label: str
@@ -149,6 +150,37 @@ class EnvelopeComponent(BaseModel):
     length_ft: float | None = None
     psi_value_Btuh_ftF: float | None = None
     source_area: str | None = None
+    assembly_id: str | None = None
+
+
+class EnvelopeAssemblyLayer(BaseModel):
+    thickness_mm: float | None = None
+    material: str | None = None
+    conductivity_w_mk: float | None = None
+    section_2_material: str | None = None
+    section_2_conductivity_w_mk: float | None = None
+    section_3_material: str | None = None
+    section_3_conductivity_w_mk: float | None = None
+
+
+class EnvelopeAssembly(BaseModel):
+    """One assembly the surfaces use (app.assemblies, PAS-79): its U-value
+    off the Components table and its layer stack off the U-values sheet,
+    transcribed in SI."""
+
+    id: str
+    name: str | None
+    component: Literal["wall", "roof", "slab_on_grade", "door"] | None = None
+    groups: list[int] = []
+    area_ft2: float | None = None
+    surface_count: int = 0
+    u_value_w_m2k: float | None = None
+    total_thickness_mm: float | None = None
+    section_2_fraction: float | None = None
+    section_3_fraction: float | None = None
+    layers: list[EnvelopeAssemblyLayer]
+    source_u_value: str | None = None
+    source_layers: str | None = None
 
 
 class Airtightness(BaseModel):
@@ -158,6 +190,7 @@ class Airtightness(BaseModel):
 
 class Envelope(BaseModel):
     components: list[EnvelopeComponent]
+    assemblies: list[EnvelopeAssembly] = []
     airtightness: Airtightness
 
 

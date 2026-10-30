@@ -32,6 +32,11 @@ DOWNLOADS = pathlib.Path.home() / "Downloads"
 
 # The Summary block's columns are transposed between the two versions:
 # v9.7 has label/group/area in L/M/N, v10 has area/label/group in L/M/N.
+# PHPP's Summary block is in the workbook's own unit; the parser emits ft2.
+# Holmes (SI) failed this once the parser converted: the test had compared
+# m2 with m2 under an `area_ft2` key.
+SUMMARY_TO_FT2 = {"EN_9_7IP": 1.0, "EN_10_6IP": 1.0, "EN_10_6": 10.763910416709722}
+
 SUMMARY_LAYOUT = {
     "EN_9_7IP": ("M", "N"),  # (group col, area col)
     "EN_10_6IP": ("N", "L"),
@@ -70,7 +75,7 @@ def _phpp_group_totals(path, version):
             except (TypeError, ValueError):
                 continue
             if group in GROUP_TO_COMPONENT and isinstance(area, (int, float)):
-                totals[GROUP_TO_COMPONENT[group]] += area
+                totals[GROUP_TO_COMPONENT[group]] += area * SUMMARY_TO_FT2[version]
         return dict(totals)
     finally:
         wb.close()

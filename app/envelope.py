@@ -4,13 +4,13 @@ Emits the ``envelope`` subtree of the v1.0.0 output schema. P2.3 covers:
 
   components  — walls / roofs / floors / doors from AREAS surface_rows,
                 plus thermal bridges from AREAS thermal_bridge_rows
+  assemblies  — each assembly the surfaces use: U-value and layer stack
+                (app.assemblies, PAS-79). Each surface carries its
+                ``assembly_id`` as the join key.
   airtightness.n50_ach — from VENTILATION (one-cell read)
 
 Deferred to follow-up tickets:
 
-  * P2.3.b — opaque U/R-values from R-Values sheet (assembly_id lookup
-    via ``shape.UVALUES.constructor`` walk; non-trivial because each
-    assembly is a multi-row block keyed by header offset).
   * P2.3.c — windows from the Windows sheet (separate sheet, separate
     conventions: u_w vs u_w_installed, glazing_id linkage).
 
@@ -31,6 +31,8 @@ from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from PHX.PHPP.phpp_localization import shape_model
 
+from app.assemblies import read_assemblies, split_assembly_ref
+
 # PHPP group_number → schema component enum. Pinned 2026-05-04 against the
 # canonical 10.6 IP example. Groups 0 and 1 are aggregates (footprint, TFA);
 # 2-6 are window placeholders that point at the Windows sheet (handled in
@@ -45,25 +47,60 @@ GROUP_TO_COMPONENT = {
 
 _GROUP_PREFIX = re.compile(r"^\s*(\d+)\s*-")
 
+# The output keys are imperial (area_ft2, length_ft, psi_value_Btuh_ftF).
+# An SI workbook's Areas sheet is metric -- the shape says so -- and its
+# figures were emitted unconverted under those keys until this conversion.
+_TO_IMPERIAL = {
+    "FT2": 1.0, "M2": 10.763910416709722,
+    "FT": 1.0, "M": 3.280839895013123,
+    "BTU/HR-FT-F": 1.0, "W/MK": 0.5777893165676,
+}
+
 
 def read_envelope(wb: Workbook, shape: shape_model.PhppShape) -> dict[str, Any]:
     """Read the envelope subtree. Always returns the structure; each
     sub-piece (components list, airtightness) handles its own missing-
     sheet case by emitting an empty/null variant."""
+    rows = _surface_rows(wb, shape.AREAS)
+    assemblies = read_assemblies(wb, [r for r in rows if r["group"] not in _NOT_ASSEMBLY_GROUPS])
+    surfaces = [_public(r) for r in rows if r["component"] is not None]
     return {
-        "components": _components(wb, shape),
+        "components": surfaces + _thermal_bridge_components(wb, shape.AREAS),
+        "assemblies": assemblies,
         "airtightness": _airtightness(wb, shape),
     }
 
 
-def _components(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    out.extend(_surface_components(wb, shape.AREAS))
-    out.extend(_thermal_bridge_components(wb, shape.AREAS))
+# Footprint and TFA totals, and window placeholders (handled in P2.3.c).
+_NOT_ASSEMBLY_GROUPS = {0, 1, 2, 3, 4, 5, 6}
+
+
+def _public(row: dict[str, Any]) -> dict[str, Any]:
+    """A surface row as the schema emits it: the assembly as its bare id."""
+    out = {k: v for k, v in row.items() if k not in ("group", "assembly_id_raw")}
+    out["assembly_id"], _ = split_assembly_ref(row["assembly_id_raw"])
     return out
 
 
+def _to_imperial(value: float | None, unit: str | None) -> float | None:
+    if value is None:
+        return None
+    factor = _TO_IMPERIAL.get((unit or "").upper())
+    if factor is None:
+        raise ValueError(f"no imperial conversion for unit {unit!r}")
+    return value * factor
+
+
 def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]]:
+    """The surfaces of a type the schema has (see GROUP_TO_COMPONENT)."""
+    return [_public(r) for r in _surface_rows(wb, areas) if r["component"] is not None]
+
+
+def _surface_rows(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]]:
+    """Every surface row, with its group number and raw assembly reference,
+    and ``component`` None for a group the schema has no type for (a wall to
+    temperature zone X, say). The assemblies count those too: they are
+    envelope, just not a type this emits."""
     ws = _sheet(wb, areas.name)
     if ws is None:
         return []
@@ -77,6 +114,7 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
 
     desc_col = column_index_from_string(rows.inputs.description.column)
     group_col = column_index_from_string(rows.inputs.group_number.column)
+    assembly_col = column_index_from_string(rows.inputs.assembly_id.column)
 
     # The shape's `area` input is the USER-OVERRIDE column ("User determined
     # [ft2]" on v9.7, "User-defined calculation [ft2]" on v10) -- empty for
@@ -96,9 +134,10 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
             break  # iterate-until-blank termination
 
         group_raw = ws.cell(row=r, column=group_col).value
+        group = _group_number(group_raw)
         component_type = _classify(group_raw)
-        if component_type is None:
-            continue  # group 0/1/2-6 — aggregates and window placeholders
+        if group is None:
+            continue
 
         area = _num(ws.cell(row=r, column=area_col).value)
         if computed_area_col and area is None:
@@ -121,8 +160,10 @@ def _surface_components(wb: Workbook, areas: shape_model.Areas) -> list[dict[str
             {
                 "component": component_type,
                 "label": str(desc),
-                "area_ft2": area,
+                "area_ft2": _to_imperial(area, rows.inputs.area.unit),
                 "source_area": f"{areas.name}!{area_letter}{r}",
+                "group": group,
+                "assembly_id_raw": ws.cell(row=r, column=assembly_col).value,
             }
         )
     return out
@@ -159,8 +200,8 @@ def _thermal_bridge_components(
             {
                 "component": "thermal_bridge",
                 "label": str(desc),
-                "length_ft": length,
-                "psi_value_Btuh_ftF": psi,
+                "length_ft": _to_imperial(length, tbs.inputs.length.unit),
+                "psi_value_Btuh_ftF": _to_imperial(psi, tbs.inputs.psi_value.unit),
                 "source_area": f"{areas.name}!{tbs.inputs.length.column}{r}",
             }
         )
