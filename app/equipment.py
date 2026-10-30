@@ -277,6 +277,8 @@ _HEAT_PUMPS = (
     ("WP_Heizung_Auswahl_Waermepumpe", "WP_Heizung_ankreuzen", "heat_pump"),
     ("WP_Heizungssystem_Auswahl_Luft_Luft_WP", "WP_LuftLuft_ankreuzen", "heat_pump"),
     ("WP_Warmwassersystem_Auswahl_WP", "WP_WWseparat_ankreuzen", "dhw_heat_pump"),
+    # A combined ventilation unit with a heat pump (or a split unit) heating the house.
+    ("WP_Heizungssystem_Auswahl_Lueftung", "WP_Kombi_ankreuzen", "heat_pump"),
 )
 
 # Each selection's test-point table: the unit's own catalogue figures, which
@@ -289,12 +291,18 @@ _HP_TABLES = {
     "WP_Heizung_Auswahl_Waermepumpe": 27,
     "WP_Heizungssystem_Auswahl_Luft_Luft_WP": 50,
     "WP_Warmwassersystem_Auswahl_WP": 84,
+    # The combined unit's ten rows are five points, each its maximum then its
+    # on/off limit ("Test point 1- maximum", "Test point 1- ON/OFF limit", ...).
+    "WP_Heizungssystem_Auswahl_Lueftung": 66,
 }
 _HP_TEST_POINTS = 8
+_HP_POINTS = {"WP_Heizungssystem_Auswahl_Lueftung": 10}
 _HP_FIRST_COL = "AC"   # AC label, AD source °C, AE sink °C, AF capacity kW, AG COP
 _HP_LAST_COL = "AG"
 _HP_TABLES_FIRST_ROW = min(_HP_TABLES.values()) - 1
-_HP_TABLES_LAST_ROW = max(_HP_TABLES.values()) + _HP_TEST_POINTS - 1
+_HP_TABLES_LAST_ROW = max(
+    start + _HP_POINTS.get(name, _HP_TEST_POINTS) - 1 for name, start in _HP_TABLES.items()
+)
 
 _NO_TEST_POINTS_NOTE = "; test points not found beside the selection"
 
@@ -316,10 +324,14 @@ def _hp_rows(wb: Workbook, sheet: str | None) -> dict[int, tuple]:
 def _table_found(rows: dict[int, tuple], start: int) -> bool:
     label = (rows.get(start) or (None,) * 5)[0]
     unit = (rows.get(start - 1) or (None,) * 5)[3]
-    return label == "Test point 1" and unit == "kW"
+    # The combined unit's first row reads "Test point 1- maximum".
+    first = isinstance(label, str) and re.fullmatch(r"Test point 1(- maximum)?", label) is not None
+    return first and unit == "kW"
 
 
-def _rating(rows: dict[int, tuple], start: int) -> dict[str, Any] | None:
+def _rating(
+    rows: dict[int, tuple], start: int, points: int = _HP_TEST_POINTS
+) -> dict[str, Any] | None:
     """The test point with the largest heating capacity, and the COP there --
     the rule ps-rails' extraction prompt gives -- or None when the table is
     missing, mislabelled or empty.
@@ -331,20 +343,24 @@ def _rating(rows: dict[int, tuple], start: int) -> dict[str, Any] | None:
         return None
 
     best = None
-    for n in range(_HP_TEST_POINTS):
-        _label, source, sink, capacity, cop = rows.get(start + n) or (None,) * 5
+    for n in range(points):
+        label, source, sink, capacity, cop = rows.get(start + n) or (None,) * 5
         capacity, cop = _as_float(capacity), _as_float(cop)
         if capacity is None or cop is None or capacity <= 0 or cop <= 0:
             continue
         if best is None or capacity > best["capacity"]:
-            best = {"point": n + 1, "source": source, "sink": sink,
+            # The row's own label names the point: the combined unit's rows are
+            # not one point each ("Test point 2- Maximum" is its third row).
+            named = isinstance(label, str) and label.strip()
+            point = label.strip().lower() if named else f"test point {n + 1}"
+            best = {"point": point, "source": source, "sink": sink,
                     "capacity": capacity, "cop": cop}
     return best
 
 
 def _hp_source(selection: str, rating: dict[str, Any] | None, table_found: bool) -> str:
     if rating is not None:
-        return (f"{selection}; test point {rating['point']} "
+        return (f"{selection}; {rating['point']} "
                 f"({rating['source']} °C source, {rating['sink']} °C sink)")
     return selection if table_found else f"{selection}{_NO_TEST_POINTS_NOTE}"
 
@@ -364,7 +380,7 @@ def _heat_pumps(wb: Workbook) -> list[dict[str, Any]]:
             tables[sheet] = _hp_rows(wb, sheet)
         rows = tables[sheet]
         start = _HP_TABLES[selection]
-        rating = _rating(rows, start)
+        rating = _rating(rows, start, _HP_POINTS.get(selection, _HP_TEST_POINTS))
 
         out.append(_item(
             equipment_type=equipment_type,
