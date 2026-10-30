@@ -82,7 +82,8 @@ def test_reads_every_assembly_the_surfaces_use(case):
 def test_every_opaque_surface_points_at_an_assembly_it_read(case):
     _, envelope = case
     ids = {a["id"] for a in envelope["assemblies"]}
-    opaque = [c for c in envelope["components"] if c["component"] != "thermal_bridge"]
+    not_surfaces = ("thermal_bridge", "window")
+    opaque = [c for c in envelope["components"] if c["component"] not in not_surfaces]
     linked = [c for c in opaque if c["assembly_id"]]
     assert linked and {c["assembly_id"] for c in linked} <= ids
 

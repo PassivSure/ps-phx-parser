@@ -7,12 +7,11 @@ Emits the ``envelope`` subtree of the v1.0.0 output schema. P2.3 covers:
   assemblies  — each assembly the surfaces use: U-value and layer stack
                 (app.assemblies, PAS-79). Each surface carries its
                 ``assembly_id`` as the join key.
+  windows     — one component per Windows-sheet row (P2.3.c, PAS-80): its
+                area (quantity included), Uw INSTALLED (the installation
+                bridges included, as PHPP's heat balance and ps-rails use it,
+                never the bare Uw), g-value, and glazing / frame ids.
   airtightness.n50_ach — from VENTILATION (one-cell read)
-
-Deferred to follow-up tickets:
-
-  * P2.3.c — windows from the Windows sheet (separate sheet, separate
-    conventions: u_w vs u_w_installed, glazing_id linkage).
 
 Patterns:
   * iterate-until-blank from a locator header ("Area input", "Thermal
@@ -54,6 +53,7 @@ _TO_IMPERIAL = {
     "FT2": 1.0, "M2": 10.763910416709722,
     "FT": 1.0, "M": 3.280839895013123,
     "BTU/HR-FT-F": 1.0, "W/MK": 0.5777893165676,
+    "BTU/HR-FT2-F": 1.0, "W/M2K": 0.17611018,
 }
 
 
@@ -65,14 +65,108 @@ def read_envelope(wb: Workbook, shape: shape_model.PhppShape) -> dict[str, Any]:
     assemblies = read_assemblies(wb, [r for r in rows if r["group"] not in _NOT_ASSEMBLY_GROUPS])
     surfaces = [_public(r) for r in rows if r["component"] is not None]
     return {
-        "components": surfaces + _thermal_bridge_components(wb, shape.AREAS),
+        "components": (
+            surfaces + read_windows(wb, shape) + _thermal_bridge_components(wb, shape.AREAS)
+        ),
         "assemblies": assemblies,
         "airtightness": _airtightness(wb, shape),
     }
 
 
-# Footprint and TFA totals, and window placeholders (handled in P2.3.c).
+# Footprint and TFA totals, and window placeholders (the windows come from
+# the Windows sheet, read_windows).
 _NOT_ASSEMBLY_GROUPS = {0, 1, 2, 3, 4, 5, 6}
+
+# The g-value column has no PHX input; it is found by its header label.
+# v10 heads it "g-value glazing", v9.7 "SHGC" (a row above the "Quan-tity" row).
+_G_LABEL = re.compile(r"^\s*(g-value|shgc)\b", re.IGNORECASE)
+
+
+def read_windows(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, Any]]:
+    """One window component per Windows-sheet row with an area, between the
+    "Quan-tity" header and the "Unhide ..." end marker. A row PHPP leaves
+    empty (no area, or zero) is skipped."""
+    windows = shape.WINDOWS
+    ws = _sheet(wb, windows.name)
+    if ws is None:
+        return []
+
+    rows = windows.window_rows
+    header_row = _find_row_starting(ws, rows.locator_col_entry, rows.locator_string_entry)
+    if header_row is None:
+        return []
+    end_row = _find_row_starting(ws, windows.window_rows_end.locator_col_entry,
+                                 windows.window_rows_end.locator_string_entry, after=header_row)
+    last = (end_row - 1) if end_row else ws.max_row
+
+    cols = rows.inputs
+    # An edition may map no column for an input (v9.7 has no frame column): it reads as absent.
+    names = ("quantity", "description", "glazing_id", "frame_id", "window_area", "u_w_installed")
+    col = {name: column_index_from_string(getattr(cols, name).column)
+           for name in names if getattr(cols, name).column}
+    if "window_area" not in col or "u_w_installed" not in col:
+        return []
+    g_col = _g_column(ws, header_row)
+    area_unit, u_unit = cols.window_area.unit, cols.u_w_installed.unit
+
+    out: list[dict[str, Any]] = []
+    for r in range(header_row + 2, last + 1):
+        area = _num(ws.cell(row=r, column=col["window_area"]).value)
+        if area and area > 0:
+            out.append(_window_row(ws, windows.name, r, col, g_col, area, area_unit, u_unit))
+    return out
+
+
+def _window_row(ws: Worksheet, sheet: str, r: int, col: dict[str, int], g_col: int | None,
+                area: float, area_unit: str | None, u_unit: str | None) -> dict[str, Any]:
+    def ref(c: int) -> str:
+        return f"{sheet}!{get_column_letter(c)}{r}"
+
+    def cell(name: str) -> Any:
+        return ws.cell(row=r, column=col[name]).value if name in col else None
+
+    desc = cell("description")
+    quantity = _num(cell("quantity"))
+    if quantity is not None and quantity.is_integer():
+        quantity = int(quantity)
+    window = {
+        "component": "window",
+        "label": str(desc).strip() if desc is not None else f"Window row {r}",
+        "quantity": quantity,
+        "area_ft2": _to_imperial(area, area_unit),
+        "u_value_Btuh_ft2F": _to_imperial(_num(cell("u_w_installed")), u_unit),
+        "shgc": _num(ws.cell(row=r, column=g_col).value) if g_col else None,
+        "glazing_id": split_assembly_ref(cell("glazing_id"))[0],
+        "frame_id": split_assembly_ref(cell("frame_id"))[0],
+        "source_area": ref(col["window_area"]),
+        "source_u_value": ref(col["u_w_installed"]),
+    }
+    if g_col:
+        window["source_shgc"] = ref(g_col)
+    return window
+
+
+def _find_row_starting(ws: Worksheet, col_letter: str, needle: str, after: int = 0) -> int | None:
+    """The first row after +after+ whose cell in the column starts with +needle+
+    ("Quan-" for the cell "Quan-\\ntity")."""
+    col_idx = column_index_from_string(col_letter)
+    target = needle.strip().lower()
+    for r in range(after + 1, ws.max_row + 1):
+        v = ws.cell(row=r, column=col_idx).value
+        if isinstance(v, str) and v.strip().lower().startswith(target):
+            return r
+    return None
+
+
+def _g_column(ws: Worksheet, header_row: int) -> int | None:
+    for r in (header_row, header_row - 1):
+        if r < 1:
+            continue
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(row=r, column=c).value
+            if isinstance(v, str) and _G_LABEL.match(v):
+                return c
+    return None
 
 
 def _public(row: dict[str, Any]) -> dict[str, Any]:

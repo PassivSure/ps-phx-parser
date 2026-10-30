@@ -94,7 +94,9 @@ def case(request):
 def _parsed_totals(envelope):
     totals = defaultdict(float)
     for component in envelope["components"]:
-        if component["component"] == "thermal_bridge":
+        # The Areas sheet totals surfaces; windows come from the Windows sheet
+        # (test_envelope_windows reconciles them with its own totals).
+        if component["component"] in ("thermal_bridge", "window"):
             continue
         totals[component["component"]] += component["area_ft2"] or 0.0
     return dict(totals)
@@ -120,7 +122,7 @@ def test_surfaces_are_present_and_all_carry_an_area(case):
     nulls. Each is silent on its own."""
     envelope, _ = case
     surfaces = [
-        c for c in envelope["components"] if c["component"] != "thermal_bridge"
+        c for c in envelope["components"] if c["component"] not in ("thermal_bridge", "window")
     ]
 
     assert surfaces, "no surface components parsed"
@@ -141,6 +143,6 @@ def test_no_surface_is_emitted_without_an_area(case):
     area."""
     envelope, _ = case
     surfaces = [
-        c for c in envelope["components"] if c["component"] != "thermal_bridge"
+        c for c in envelope["components"] if c["component"] not in ("thermal_bridge", "window")
     ]
     assert all(s["area_ft2"] is not None for s in surfaces)
