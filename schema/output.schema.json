@@ -194,6 +194,11 @@
         },
         "source_area": { "type": "string" },
         "source_u_value": { "type": "string" },
+        "quantity": { "type": ["number", "null"], "description": "Windows only: the row's quantity; area_ft2 already includes it." },
+        "shgc": { "type": ["number", "null"], "description": "Windows only: the glazing's g-value (0-1)." },
+        "source_shgc": { "type": "string" },
+        "glazing_id": { "type": ["string", "null"], "description": "Windows only: the Components glazing id (\"01ud\")." },
+        "frame_id": { "type": ["string", "null"], "description": "Windows only: the Components frame id; null on an edition with no frame column." },
         "assembly_id": {
           "type": ["string", "null"],
           "description": "Opaque surfaces: the id of the assembly it uses (\"01ud\"), the key into envelope.assemblies. Null when the surface names none."

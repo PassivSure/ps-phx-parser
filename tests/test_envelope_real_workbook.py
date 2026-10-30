@@ -47,6 +47,7 @@ def test_real_component_counts_by_type(real_envelope):
         "roof": 4,
         "wall": 20,
         "thermal_bridge": 2,
+        "window": 64,  # one per Windows-sheet row with an area (PAS-80)
     }
 
 
