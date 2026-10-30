@@ -129,8 +129,9 @@ HEAT_PUMPS = {
         ("dhw_heat_pump", "Standard air/water heat pump"): (5.0, 4.3),
     }),
     "holmes_si": ("2536 Holmes_easyPH_260512.xlsx", "EN_10_6", {
-        # Its heating is a combined ventilation unit (93ud), a table this
-        # reader does not read yet.
+        # Its heating is a combined ventilation unit (93ud): HP!AF66 / AG66,
+        # test point 1's maximum, the largest of its ten points.
+        ("heat_pump", "easyPH heating"): (13.07, 3.91),
         ("dhw_heat_pump", "HPWH"): (1.6, 2.84),
     }),
 }

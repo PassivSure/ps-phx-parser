@@ -19,10 +19,20 @@ NAMED_CELLS = {
     "WP_Heizungssystem_Auswahl_Luft_Luft_WP": "K45",
     "WP_WWseparat_ankreuzen": "I70",
     "WP_Warmwassersystem_Auswahl_WP": "K71",
+    "WP_Kombi_ankreuzen": "I54",
+    "WP_Heizungssystem_Auswahl_Lueftung": "K56",
 }
 
 # section -> first test-point row
-TABLE_ROWS = {"water": 27, "air": 50, "dhw": 84}
+TABLE_ROWS = {"water": 27, "air": 50, "dhw": 84, "combined": 66}
+
+# The combined unit's table pairs each point: its maximum, then its on/off limit.
+COMBINED_LABELS = [
+    label
+    for n in range(1, 6)
+    for label in (f"Test point {n}- {'maximum' if n == 1 else 'Maximum'}",
+                  f"Test point {n}- ON/OFF limit")
+]
 
 AIR_SELECTION = "WP_Heizungssystem_Auswahl_Luft_Luft_WP"
 WATER_SELECTION = "WP_Heizung_Auswahl_Waermepumpe"
@@ -43,7 +53,10 @@ def _hp_wb(*, sheet="HP SI", values=None, tables=None, unit="kW", label="Test po
         ws[f"AF{start - 1}"] = unit
         for i, (source, sink, capacity, cop) in enumerate(points):
             row = start + i
-            ws[f"AC{row}"] = label if i == 0 else f"Test point {i + 1}"
+            if section == "combined":
+                ws[f"AC{row}"] = COMBINED_LABELS[i] if label == "Test point 1" or i else label
+            else:
+                ws[f"AC{row}"] = label if i == 0 else f"Test point {i + 1}"
             for col, value in zip("DEFG", (source, sink, capacity, cop), strict=True):
                 ws[f"A{col}{row}"] = value
     return wb
@@ -140,6 +153,47 @@ class TestWaterBased:
         wb = _hp_wb(values={WATER_SELECTION: STANDARD_WATER},
                     tables={"water": WATER})
         assert read_equipment(wb, "EN_10_6IP") == []
+
+
+# Holmes' easyPH combined unit "93ud-easyPH heating", rows 66-75
+# (each point's maximum, then its on/off limit).
+COMBINED = [
+    (8.3, 21.1, 13.0727, 3.9081), (8.3, 21.1, 6.5733, 4.6774),
+    (2.8, 21.1, 11.374, 3.3542), (2.8, 21.1, 5.687, 4.0312),
+    (-2.8, 21.1, 9.6753, 2.5849), (-2.8, 21.1, 4.8746, 3.0772),
+    (-5.6, 21.1, 8.7151, 2.4618), (-5.6, 21.1, 4.3576, 2.9849),
+    (-11.1, 21.1, 7.0164, 2.2772), (-11.1, 21.1, 3.5451, 2.7387),
+]
+COMBINED_SELECTION = "WP_Heizungssystem_Auswahl_Lueftung"
+
+
+class TestCombinedVentilationUnit:
+    def test_reads_the_largest_capacity_of_its_ten_points_and_the_cop_there(self):
+        wb = _hp_wb(sheet="HP",
+                    values={"WP_Kombi_ankreuzen": "x", COMBINED_SELECTION: "93ud-easyPH heating"},
+                    tables={"combined": COMBINED})
+        [hp] = _of(read_equipment(wb, "EN_10_6"), "heat_pump")
+        assert hp["name"] == "easyPH heating"
+        assert (hp["capacity"], hp["efficiency_value"]) == (13.0727, 3.9081)
+        assert hp["source"].startswith("WP_Heizungssystem_Auswahl_Lueftung; test point 1")
+
+    def test_reads_past_point_eight(self):
+        points = [(0, 0, 0, 0)] * 9 + [(-11.1, 21.1, 3.5, 2.7)]
+        wb = _hp_wb(values={"WP_Kombi_ankreuzen": "x", COMBINED_SELECTION: "01ud-Unit"},
+                    tables={"combined": points})
+        [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
+        assert (hp["capacity"], hp["efficiency_value"]) == (3.5, 2.7)
+
+    def test_an_unticked_combined_unit_is_not_emitted(self):
+        wb = _hp_wb(values={COMBINED_SELECTION: "93ud-easyPH heating"},
+                    tables={"combined": COMBINED})
+        assert read_equipment(wb, "EN_10_6") == []
+
+    def test_a_combined_table_not_labelled_test_point_1_reads_nothing(self):
+        wb = _hp_wb(values={"WP_Kombi_ankreuzen": "x", COMBINED_SELECTION: "01ud-Unit"},
+                    tables={"combined": COMBINED}, label="Something else")
+        [hp] = _of(read_equipment(wb, "EN_10_6IP"), "heat_pump")
+        assert hp["capacity"] is None
 
 
 def test_reads_the_sheet_the_selection_name_points_at():
