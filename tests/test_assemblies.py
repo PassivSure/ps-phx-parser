@@ -129,7 +129,7 @@ def test_an_unknown_id_is_emitted_with_nothing_read():
 def test_an_unused_block_is_not_read():
     """Block 2 has an id and a U but a blank name, as PHPP leaves unused ones."""
     [a] = read_assemblies(_donovan_like(), [_surface("07ud-", 5.0)])
-    assert a["layers"] == [] and a["name"] is None
+    assert a["layers"] == [] and a["name"] is None and a["source_layers"] is None
 
 
 def test_a_block_whose_header_moved_reads_no_layers():
