@@ -128,6 +128,23 @@ class TestReadWindows:
         assert w["shgc"] is None
         assert "source_shgc" not in w
 
+    def test_reads_only_inside_the_bounded_sheet_when_there_is_no_end_marker(self):
+        """A sheet with no end marker reads to the bound, never to a declared max_row."""
+        shape = load_shape("EN_10_6IP")
+        w = shape.WINDOWS
+        cols = w.window_rows.inputs
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet(w.name)
+        ws[f"{w.window_rows.locator_col_entry}21"] = "Quan-\ntity"
+        for r, label in ((23, "W1"), (401, "past the bound")):
+            ws[f"{cols.description.column}{r}"] = label
+            ws[f"{cols.window_area.column}{r}"] = 10.0
+            ws[f"{cols.u_w_installed.column}{r}"] = 0.14
+        ws.cell(row=1_048_576, column=1, value="far")
+
+        assert [x["label"] for x in read_windows(wb, shape)] == ["W1"]
+
     def test_is_empty_without_a_windows_sheet(self):
         wb = Workbook()
         assert read_windows(wb, load_shape("EN_10_6IP")) == []

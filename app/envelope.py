@@ -82,6 +82,13 @@ _NOT_ASSEMBLY_GROUPS = {0, 1, 2, 3, 4, 5, 6}
 _G_LABEL = re.compile(r"^\s*(g-value|shgc)\b", re.IGNORECASE)
 
 
+# The Windows sheet is read once, inside these bounds. A real v10 sheet ends its
+# rows at 177 and uses nothing past column BA; the bound keeps a workbook that
+# declares a huge sheet (or has no end marker) from costing a scan per cell.
+_WINDOWS_MAX_ROW = 400
+_WINDOWS_MAX_COL = 80  # CB
+
+
 def read_windows(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, Any]]:
     """One window component per Windows-sheet row with an area, between the
     "Quan-tity" header and the "Unhide ..." end marker. A row PHPP leaves
@@ -90,14 +97,15 @@ def read_windows(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, A
     ws = _sheet(wb, windows.name)
     if ws is None:
         return []
+    grid = _Grid(ws, _WINDOWS_MAX_ROW, _WINDOWS_MAX_COL)
 
     rows = windows.window_rows
-    header_row = _find_row_starting(ws, rows.locator_col_entry, rows.locator_string_entry)
+    header_row = grid.find_row_starting(rows.locator_col_entry, rows.locator_string_entry)
     if header_row is None:
         return []
-    end_row = _find_row_starting(ws, windows.window_rows_end.locator_col_entry,
-                                 windows.window_rows_end.locator_string_entry, after=header_row)
-    last = (end_row - 1) if end_row else ws.max_row
+    end_row = grid.find_row_starting(windows.window_rows_end.locator_col_entry,
+                                     windows.window_rows_end.locator_string_entry, after=header_row)
+    last = (end_row - 1) if end_row else grid.max_row
 
     cols = rows.inputs
     # An edition may map no column for an input (v9.7 has no frame column): it reads as absent.
@@ -106,24 +114,52 @@ def read_windows(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, A
            for name in names if getattr(cols, name).column}
     if "window_area" not in col or "u_w_installed" not in col:
         return []
-    g_col = _g_column(ws, header_row)
+    g_col = _g_column(grid, header_row)
     area_unit, u_unit = cols.window_area.unit, cols.u_w_installed.unit
 
     out: list[dict[str, Any]] = []
     for r in range(header_row + 2, last + 1):
-        area = _num(ws.cell(row=r, column=col["window_area"]).value)
+        area = _num(grid.value(r, col["window_area"]))
         if area and area > 0:
-            out.append(_window_row(ws, windows.name, r, col, g_col, area, area_unit, u_unit))
+            out.append(_window_row(grid, windows.name, r, col, g_col, area, area_unit, u_unit))
     return out
 
 
-def _window_row(ws: Worksheet, sheet: str, r: int, col: dict[str, int], g_col: int | None,
+class _Grid:
+    """A bounded, values-only copy of a sheet's top-left corner, read in one pass."""
+
+    def __init__(self, ws: Worksheet, max_row: int, max_col: int):
+        self.rows = [tuple(row) for row in ws.iter_rows(min_row=1, max_row=max_row,
+                                                         max_col=max_col, values_only=True)]
+        self.max_row = len(self.rows)
+        self.max_col = max_col
+
+    def value(self, r: int, c: int) -> Any:
+        if 1 <= r <= self.max_row:
+            row = self.rows[r - 1]
+            if 1 <= c <= len(row):
+                return row[c - 1]
+        return None
+
+    def find_row_starting(self, col_letter: str, needle: str, after: int = 0) -> int | None:
+        """The first row after +after+ whose cell in the column starts with +needle+
+        ("Quan-" for the cell "Quan-\\ntity")."""
+        col_idx = column_index_from_string(col_letter)
+        target = needle.strip().lower()
+        for r in range(after + 1, self.max_row + 1):
+            v = self.value(r, col_idx)
+            if isinstance(v, str) and v.strip().lower().startswith(target):
+                return r
+        return None
+
+
+def _window_row(grid: _Grid, sheet: str, r: int, col: dict[str, int], g_col: int | None,
                 area: float, area_unit: str | None, u_unit: str | None) -> dict[str, Any]:
     def ref(c: int) -> str:
         return f"{sheet}!{get_column_letter(c)}{r}"
 
     def cell(name: str) -> Any:
-        return ws.cell(row=r, column=col[name]).value if name in col else None
+        return grid.value(r, col[name]) if name in col else None
 
     desc = cell("description")
     quantity = _num(cell("quantity"))
@@ -135,7 +171,7 @@ def _window_row(ws: Worksheet, sheet: str, r: int, col: dict[str, int], g_col: i
         "quantity": quantity,
         "area_ft2": _to_imperial(area, area_unit),
         "u_value_Btuh_ft2F": _to_imperial(_num(cell("u_w_installed")), u_unit),
-        "shgc": _num(ws.cell(row=r, column=g_col).value) if g_col else None,
+        "shgc": _num(grid.value(r, g_col)) if g_col else None,
         "glazing_id": split_assembly_ref(cell("glazing_id"))[0],
         "frame_id": split_assembly_ref(cell("frame_id"))[0],
         "source_area": ref(col["window_area"]),
@@ -146,24 +182,10 @@ def _window_row(ws: Worksheet, sheet: str, r: int, col: dict[str, int], g_col: i
     return window
 
 
-def _find_row_starting(ws: Worksheet, col_letter: str, needle: str, after: int = 0) -> int | None:
-    """The first row after +after+ whose cell in the column starts with +needle+
-    ("Quan-" for the cell "Quan-\\ntity")."""
-    col_idx = column_index_from_string(col_letter)
-    target = needle.strip().lower()
-    for r in range(after + 1, ws.max_row + 1):
-        v = ws.cell(row=r, column=col_idx).value
-        if isinstance(v, str) and v.strip().lower().startswith(target):
-            return r
-    return None
-
-
-def _g_column(ws: Worksheet, header_row: int) -> int | None:
+def _g_column(grid: _Grid, header_row: int) -> int | None:
     for r in (header_row, header_row - 1):
-        if r < 1:
-            continue
-        for c in range(1, ws.max_column + 1):
-            v = ws.cell(row=r, column=c).value
+        for c in range(1, grid.max_col + 1):
+            v = grid.value(r, c)
             if isinstance(v, str) and _G_LABEL.match(v):
                 return c
     return None
