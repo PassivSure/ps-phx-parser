@@ -151,6 +151,47 @@ class EnvelopeComponent(BaseModel):
     psi_value_Btuh_ftF: float | None = None
     source_area: str | None = None
     assembly_id: str | None = None
+    # Thermal bridges: PHPP's bridge group (15 ambient, 16 perimeter, 17 FS/BC).
+    group: int | None = None
+    # Windows (app.envelope.read_windows). Declared here because pydantic drops
+    # an undeclared field: until they were, the response carried each window's
+    # label and area and nothing else.
+    quantity: float | None = None
+    u_value_Btuh_ft2F: float | None = None
+    shgc: float | None = None
+    glazing_id: str | None = None
+    glazing_name: str | None = None
+    frame_id: str | None = None
+    orientation_deg: float | None = None
+    tilt_deg: float | None = None
+    orientation: str | None = None
+    source_u_value: str | None = None
+    source_shgc: str | None = None
+
+
+class EnvelopeSurface(BaseModel):
+    """One Areas surface row, whatever its group (app.envelope._surface)."""
+
+    label: str
+    group: int
+    area_ft2: float | None = None
+    assembly_id: str | None = None
+    tilt_deg: float | None = None
+    orientation_deg: float | None = None
+    r_value_hr_ft2F_Btu: float | None = None
+    u_value_w_m2k: float | None = None
+    source_area: str | None = None
+    source_thermal: str | None = None
+
+
+class EnvelopeGroupTotal(BaseModel):
+    """PHPP's own total for an area group, from the Areas Summary block: an
+    area, or for the thermal-bridge groups (15-18) a length."""
+
+    group: int
+    area_ft2: float | None = None
+    length_ft: float | None = None
+    source: str | None = None
 
 
 class EnvelopeAssemblyLayer(BaseModel):
@@ -191,6 +232,8 @@ class Airtightness(BaseModel):
 class Envelope(BaseModel):
     components: list[EnvelopeComponent]
     assemblies: list[EnvelopeAssembly] = []
+    surfaces: list[EnvelopeSurface] = []
+    group_totals: list[EnvelopeGroupTotal] = []
     airtightness: Airtightness
 
 
