@@ -12,6 +12,13 @@ Emits the ``envelope`` subtree of the v1.0.0 output schema. P2.3 covers:
                 bridges included, as PHPP's heat balance and ps-rails use it,
                 never the bare Uw), g-value, and glazing / frame ids.
   airtightness.n50_ach — from VENTILATION (one-cell read)
+  surfaces    — every Areas surface row, whatever its group (a wall to
+                temperature zone X has no component type, but it is envelope):
+                its group, area, assembly, tilt and orientation, and the R (IP)
+                or U (SI) PHPP states for it in its own column. A door with no
+                assembly carries its typed R only there.
+  group_totals — PHPP's own area per group, from the Summary block above the
+                surface table, so a consumer can check the rows it sums.
 
 Patterns:
   * iterate-until-blank from a locator header ("Area input", "Thermal
@@ -69,8 +76,72 @@ def read_envelope(wb: Workbook, shape: shape_model.PhppShape) -> dict[str, Any]:
             surfaces + read_windows(wb, shape) + _thermal_bridge_components(wb, shape.AREAS)
         ),
         "assemblies": assemblies,
+        "surfaces": [_surface(r) for r in rows if r["group"] not in _NOT_ASSEMBLY_GROUPS],
+        "group_totals": _group_totals(wb, shape.AREAS),
         "airtightness": _airtightness(wb, shape),
     }
+
+
+# A surface row's own thermal column: "R-value [hr.ft².°F/BTU]" on an IP
+# workbook, "U-value [W/(m²K)]" on an SI one. Not in PHX's shape; found by its
+# label on the surface table's label row (AC on v10, AE on v9.7). Its
+# neighbour "EnerPHit exemption for R-value" does not start with the label.
+_THERMAL_LABEL = re.compile(r"^\s*([ru])-value\s*\[", re.IGNORECASE)
+
+
+def _surface(row: dict[str, Any]) -> dict[str, Any]:
+    """A surface row as `envelope.surfaces` emits it."""
+    out = {
+        "label": row["label"],
+        "group": row["group"],
+        "area_ft2": row["area_ft2"],
+        "assembly_id": split_assembly_ref(row["assembly_id_raw"])[0],
+        "tilt_deg": row["tilt_deg"],
+        "orientation_deg": row["orientation_deg"],
+        "r_value_hr_ft2F_Btu": row["r_value_hr_ft2F_Btu"],
+        "u_value_w_m2k": row["u_value_w_m2k"],
+        "source_area": row["source_area"],
+    }
+    if row["source_thermal"]:
+        out["source_thermal"] = row["source_thermal"]
+    return out
+
+
+def _group_totals(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]]:
+    """PHPP's area per group, from the Summary block above the surface table
+    (rows 1 .. the "Area input" header). The block's group and area columns
+    are transposed between editions (v9.7 M/N, v10 N/L); the shape names
+    them. Its area is in the workbook's own unit, the surface table's."""
+    ws = _sheet(wb, areas.name)
+    if ws is None:
+        return []
+    rows = areas.surface_rows
+    header_row = _find_header_row(ws, rows.locator_col_header, rows.locator_string_header)
+    if header_row is None:
+        return []
+
+    summary = areas.summary_rows
+    group_col = column_index_from_string(summary.group_number)
+    area_col = column_index_from_string(summary.area)
+    out: list[dict[str, Any]] = []
+    for r in range(1, header_row):
+        group = _group_number(ws.cell(row=r, column=group_col).value)
+        value = _num(ws.cell(row=r, column=area_col).value)
+        if group is None or value is None:
+            continue
+        # The thermal-bridge groups total a length, not an area.
+        if group in _BRIDGE_GROUPS:
+            length_unit = areas.thermal_bridge_rows.inputs.length.unit
+            figure = {"length_ft": _to_imperial(value, length_unit)}
+        else:
+            figure = {"area_ft2": _to_imperial(value, rows.inputs.area.unit)}
+        out.append({"group": group, **figure, "source": f"{areas.name}!{summary.area}{r}"})
+    return out
+
+
+# PHPP's thermal-bridge groups: 15 ambient, 16 perimeter, 17 floor slab /
+# basement ceiling, 18 their total.
+_BRIDGE_GROUPS = {15, 16, 17, 18}
 
 
 # Footprint and TFA totals, and window placeholders (the windows come from
@@ -109,7 +180,8 @@ def read_windows(wb: Workbook, shape: shape_model.PhppShape) -> list[dict[str, A
 
     cols = rows.inputs
     # An edition may map no column for an input (v9.7 has no frame column): it reads as absent.
-    names = ("quantity", "description", "glazing_id", "frame_id", "window_area", "u_w_installed")
+    names = ("quantity", "description", "glazing_id", "frame_id", "window_area", "u_w_installed",
+             "orientation_angle", "vertical_angle", "orientation_label")
     col = {name: column_index_from_string(getattr(cols, name).column)
            for name in names if getattr(cols, name).column}
     if "window_area" not in col or "u_w_installed" not in col:
@@ -173,7 +245,14 @@ def _window_row(grid: _Grid, sheet: str, r: int, col: dict[str, int], g_col: int
         "u_value_Btuh_ft2F": _to_imperial(_num(cell("u_w_installed")), u_unit),
         "shgc": _num(grid.value(r, g_col)) if g_col else None,
         "glazing_id": split_assembly_ref(cell("glazing_id"))[0],
+        # The glazing's name as the row picks it ("04ud-4th ESG(3)" -> "4th ESG(3)").
+        "glazing_name": split_assembly_ref(cell("glazing_id"))[1],
         "frame_id": split_assembly_ref(cell("frame_id"))[0],
+        # Deviation from north and tilt from the horizontal, in degrees, and
+        # PHPP's own orientation word ("North", "Horizontal").
+        "orientation_deg": _num(cell("orientation_angle")),
+        "tilt_deg": _num(cell("vertical_angle")),
+        "orientation": _str_or_none(cell("orientation_label")),
         "source_area": ref(col["window_area"]),
         "source_u_value": ref(col["u_w_installed"]),
     }
@@ -191,9 +270,14 @@ def _g_column(grid: _Grid, header_row: int) -> int | None:
     return None
 
 
+# Surface-row keys `envelope.surfaces` carries and the components do not.
+_SURFACE_ONLY = ("group", "assembly_id_raw", "tilt_deg", "orientation_deg",
+                 "r_value_hr_ft2F_Btu", "u_value_w_m2k", "source_thermal")
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     """A surface row as the schema emits it: the assembly as its bare id."""
-    out = {k: v for k, v in row.items() if k not in ("group", "assembly_id_raw")}
+    out = {k: v for k, v in row.items() if k not in _SURFACE_ONLY}
     out["assembly_id"], _ = split_assembly_ref(row["assembly_id_raw"])
     return out
 
@@ -240,6 +324,9 @@ def _surface_rows(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]
     computed_area_col = _computed_area_col(ws, header_row + 1)
     area_col = computed_area_col or column_index_from_string(rows.inputs.area.column)
     area_letter = get_column_letter(area_col)
+    tilt_col = column_index_from_string(rows.inputs.angle.column)
+    orientation_col = column_index_from_string(rows.inputs.orientation.column)
+    thermal = _thermal_col(ws, header_row + 1)
 
     out: list[dict[str, Any]] = []
     # Skip the header label row (header_row + 1 holds column labels like
@@ -272,6 +359,7 @@ def _surface_rows(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]
             # would drop most of the envelope.
             continue
 
+        thermal_value = _num(ws.cell(row=r, column=thermal[0]).value) if thermal else None
         out.append(
             {
                 "component": component_type,
@@ -280,9 +368,28 @@ def _surface_rows(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]
                 "source_area": f"{areas.name}!{area_letter}{r}",
                 "group": group,
                 "assembly_id_raw": ws.cell(row=r, column=assembly_col).value,
+                "tilt_deg": _num(ws.cell(row=r, column=tilt_col).value),
+                "orientation_deg": _num(ws.cell(row=r, column=orientation_col).value),
+                "r_value_hr_ft2F_Btu": thermal_value if thermal and thermal[1] == "r" else None,
+                "u_value_w_m2k": thermal_value if thermal and thermal[1] == "u" else None,
+                "source_thermal": (
+                    f"{areas.name}!{get_column_letter(thermal[0])}{r}"
+                    if thermal and thermal_value is not None else None
+                ),
             }
         )
     return out
+
+
+def _thermal_col(ws: Worksheet, label_row: int) -> tuple[int, str] | None:
+    """(column, "r" or "u") of the surface table's own thermal column, or None."""
+    for col in range(1, ws.max_column + 1):
+        value = ws.cell(row=label_row, column=col).value
+        if isinstance(value, str):
+            match = _THERMAL_LABEL.match(" ".join(value.split()))
+            if match:
+                return col, match.group(1).lower()
+    return None
 
 
 def _thermal_bridge_components(
@@ -300,6 +407,8 @@ def _thermal_bridge_components(
         return []
 
     desc_col = column_index_from_string(tbs.inputs.description.column)
+    group_col = column_index_from_string(tbs.inputs.group_number.column)
+    quantity_col = column_index_from_string(tbs.inputs.quantity.column)
     length_col = column_index_from_string(tbs.inputs.length.column)
     psi_col = column_index_from_string(tbs.inputs.psi_value.column)
 
@@ -312,10 +421,20 @@ def _thermal_bridge_components(
         psi = _num(ws.cell(row=r, column=psi_col).value)
         if length is None and psi is None:
             continue  # placeholder row with description only — skip
+        # PHPP counts a bridge as quantity x length, as it counts a window, and
+        # a row at quantity 0 counts nothing: on Holmes 15 of 42 rows are, and
+        # their lengths alone put the perimeter group at 192.7 ft against
+        # PHPP's 68.0. A row with no quantity keeps its length.
+        quantity = _num(ws.cell(row=r, column=quantity_col).value)
+        if quantity is not None and length is not None:
+            length *= quantity
         out.append(
             {
                 "component": "thermal_bridge",
                 "label": str(desc),
+                # PHPP's bridge group: 15 ambient, 16 perimeter, 17 floor slab / basement ceiling.
+                "group": _group_number(ws.cell(row=r, column=group_col).value),
+                "quantity": quantity,
                 "length_ft": _to_imperial(length, tbs.inputs.length.unit),
                 "psi_value_Btuh_ftF": _to_imperial(psi, tbs.inputs.psi_value.unit),
                 "source_area": f"{areas.name}!{tbs.inputs.length.column}{r}",
@@ -427,6 +546,12 @@ def _sheet(wb: Workbook, name: str) -> Worksheet | None:
     for sheet_name in wb.sheetnames:
         if sheet_name.strip().lower() == needle:
             return wb[sheet_name]
+    return None
+
+
+def _str_or_none(v: Any) -> str | None:
+    if isinstance(v, str) and v.strip():
+        return v.strip()
     return None
 
 

@@ -79,6 +79,14 @@
           "type": "array",
           "items": { "$ref": "#/$defs/envelope_assembly" }
         },
+        "surfaces": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envelope_surface" }
+        },
+        "group_totals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envelope_group_total" }
+        },
         "airtightness": {
           "type": "object",
           "additionalProperties": false,
@@ -193,16 +201,51 @@
           "description": "For thermal bridges only."
         },
         "source_area": { "type": "string" },
-        "source_u_value": { "type": "string" },
-        "quantity": { "type": ["number", "null"], "description": "Windows only: the row's quantity; area_ft2 already includes it." },
+        "source_u_value": { "type": ["string", "null"] },
+        "quantity": { "type": ["number", "null"], "description": "Windows and thermal bridges: the row's quantity; area_ft2 or length_ft already includes it." },
         "shgc": { "type": ["number", "null"], "description": "Windows only: the glazing's g-value (0-1)." },
-        "source_shgc": { "type": "string" },
+        "source_shgc": { "type": ["string", "null"] },
         "glazing_id": { "type": ["string", "null"], "description": "Windows only: the Components glazing id (\"01ud\")." },
+        "glazing_name": { "type": ["string", "null"], "description": "Windows only: the glazing's name as the row picks it (\"4th ESG(3)\")." },
         "frame_id": { "type": ["string", "null"], "description": "Windows only: the Components frame id; null on an edition with no frame column." },
         "assembly_id": {
           "type": ["string", "null"],
           "description": "Opaque surfaces: the id of the assembly it uses (\"01ud\"), the key into envelope.assemblies. Null when the surface names none."
-        }
+        },
+        "group": { "type": ["integer", "null"], "description": "Thermal bridges: PHPP's bridge group (15 ambient, 16 perimeter, 17 floor slab / basement ceiling)." },
+        "orientation_deg": { "type": ["number", "null"], "description": "Windows: deviation from north, degrees." },
+        "tilt_deg": { "type": ["number", "null"], "description": "Windows: tilt from the horizontal, degrees (90 = vertical)." },
+        "orientation": { "type": ["string", "null"], "description": "Windows: PHPP's orientation word (North, East, South, West, Horizontal)." }
+      }
+    },
+    "envelope_surface": {
+      "type": "object",
+      "description": "One Areas surface row, whatever its group: a wall to temperature zone X has no component type but is envelope.",
+      "required": ["label", "group"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "group": { "type": "integer", "description": "PHPP area group (7 door, 8 wall - ambient, 9 wall - ground, 10 roof/ceiling - ambient, 11 floor slab / basement ceiling, 12-13 the other ground groups, 14 temperature zone X)." },
+        "area_ft2": { "type": ["number", "null"] },
+        "assembly_id": { "type": ["string", "null"] },
+        "tilt_deg": { "type": ["number", "null"], "description": "Angle of inclination from the horizontal: 0 faces up, 90 is vertical, 180 faces down." },
+        "orientation_deg": { "type": ["number", "null"], "description": "Deviation from north, degrees." },
+        "r_value_hr_ft2F_Btu": { "type": ["number", "null"], "description": "IP workbooks: the R PHPP states for the surface in its own column. A door with no assembly carries its typed R only here." },
+        "u_value_w_m2k": { "type": ["number", "null"], "description": "SI workbooks: the U PHPP states for the surface in its own column." },
+        "source_area": { "type": ["string", "null"] },
+        "source_thermal": { "type": ["string", "null"] }
+      }
+    },
+    "envelope_group_total": {
+      "type": "object",
+      "description": "PHPP's own total for an area group, from the Areas Summary block above the surface table.",
+      "required": ["group"],
+      "additionalProperties": false,
+      "properties": {
+        "group": { "type": "integer" },
+        "area_ft2": { "type": ["number", "null"], "description": "The group's area, ft2 (groups 0-14)." },
+        "length_ft": { "type": ["number", "null"], "description": "The thermal-bridge groups (15-18): their length, ft, quantity included." },
+        "source": { "type": ["string", "null"] }
       }
     },
     "envelope_assembly": {
