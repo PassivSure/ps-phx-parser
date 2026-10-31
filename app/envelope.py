@@ -131,7 +131,8 @@ def _group_totals(wb: Workbook, areas: shape_model.Areas) -> list[dict[str, Any]
             continue
         # The thermal-bridge groups total a length, not an area.
         if group in _BRIDGE_GROUPS:
-            figure = {"length_ft": _to_imperial(value, areas.thermal_bridge_rows.inputs.length.unit)}
+            length_unit = areas.thermal_bridge_rows.inputs.length.unit
+            figure = {"length_ft": _to_imperial(value, length_unit)}
         else:
             figure = {"area_ft2": _to_imperial(value, rows.inputs.area.unit)}
         out.append({"group": group, **figure, "source": f"{areas.name}!{summary.area}{r}"})

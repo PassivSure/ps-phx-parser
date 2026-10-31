@@ -49,7 +49,8 @@ def test_every_surface_group_adds_up_to_phpps_total(envelope):
     totals = _totals(envelope)
 
     for group in range(7, 15):
-        assert sums.get(group, 0.0) == pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6), group
+        expected = pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6)
+        assert sums.get(group, 0.0) == expected, group
 
 
 def test_windows_add_up_to_phpps_total_for_each_orientation(envelope):
@@ -61,7 +62,8 @@ def test_windows_add_up_to_phpps_total_for_each_orientation(envelope):
 
     assert windows
     for group in WINDOW_GROUPS.values():
-        assert sums.get(group, 0.0) == pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6), group
+        expected = pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6)
+        assert sums.get(group, 0.0) == expected, group
 
 
 def test_bridge_lengths_add_up_to_phpps_total_for_each_group(envelope):
@@ -72,7 +74,8 @@ def test_bridge_lengths_add_up_to_phpps_total_for_each_group(envelope):
     totals = {t["group"]: t["length_ft"] for t in envelope["group_totals"] if "length_ft" in t}
 
     for group in (15, 16, 17):
-        assert sums.get(group, 0.0) == pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6), group
+        expected = pytest.approx(totals.get(group, 0.0), rel=1e-9, abs=1e-6)
+        assert sums.get(group, 0.0) == expected, group
 
 
 def test_every_used_surface_states_its_thermal_figure(envelope):
@@ -90,7 +93,8 @@ def test_the_envelope_survives_the_response_model(envelope):
     dumped = Envelope.model_validate(envelope).model_dump()
 
     assert dumped["components"] == [
-        {**{k: None for k in dumped["components"][i]}, **c} for i, c in enumerate(envelope["components"])
+        {**{k: None for k in dumped["components"][i]}, **c}
+        for i, c in enumerate(envelope["components"])
     ]
     assert len(dumped["surfaces"]) == len(envelope["surfaces"])
     assert len(dumped["group_totals"]) == len(envelope["group_totals"])
