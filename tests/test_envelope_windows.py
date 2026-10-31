@@ -79,7 +79,11 @@ class TestReadWindows:
             "u_value_Btuh_ft2F": 0.140,  # Uw installed (BA), never Uw (AZ)
             "shgc": 0.5,
             "glazing_id": "01ud",
+            "glazing_name": "Triple Kr",
             "frame_id": "02ud",
+            "orientation_deg": None,
+            "tilt_deg": None,
+            "orientation": None,
             "source_area": "Windows!AW23",
             "source_u_value": "Windows!BA23",
             "source_shgc": "Windows!AS23",
