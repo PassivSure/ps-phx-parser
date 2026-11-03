@@ -115,6 +115,16 @@
       "type": "array",
       "items": { "$ref": "#/$defs/hvac_equipment_item" }
     },
+    "heat_generation": {
+      "type": ["object", "null"],
+      "description": "PER's heat-generation rows per use; a source is in use when its final energy is above zero. A block is null when its locators were not found.",
+      "additionalProperties": false,
+      "properties": {
+        "heating": { "$ref": "#/$defs/heat_generation_block" },
+        "dhw": { "$ref": "#/$defs/heat_generation_block" },
+        "cooling": { "$ref": "#/$defs/heat_generation_block" }
+      }
+    },
     "project_info": {
       "type": "object",
       "additionalProperties": false,
@@ -153,6 +163,18 @@
     }
   },
   "$defs": {
+    "heat_generation_block": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": ["string", "null"] },
+          "final_energy": { "type": ["number", "null"] },
+          "source": { "type": ["string", "null"] }
+        }
+      }
+    },
     "measurement": {
       "type": "object",
       "required": ["value", "unit"],
