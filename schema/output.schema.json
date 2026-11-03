@@ -125,6 +125,22 @@
         "cooling": { "$ref": "#/$defs/heat_generation_block" }
       }
     },
+    "boiler": {
+      "type": ["object", "null"],
+      "description": "The Boiler sheet's boiler, from its 'Project data' column; null when the type is blank or 1-None. Whether it is in use is heat_generation's call.",
+      "additionalProperties": false,
+      "properties": {
+        "boiler_type": { "type": ["string", "null"] },
+        "fuel": { "type": ["string", "null"] },
+        "design_output": { "type": ["number", "null"] },
+        "design_output_unit": { "type": ["string", "null"] },
+        "indoor": { "type": ["boolean", "null"] },
+        "efficiency_30": { "type": ["number", "null"] },
+        "efficiency_100": { "type": ["number", "null"] },
+        "standby_loss_70": { "type": ["number", "null"] },
+        "sources": { "type": ["object", "null"], "additionalProperties": { "type": "string" } }
+      }
+    },
     "project_info": {
       "type": "object",
       "additionalProperties": false,

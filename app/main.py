@@ -297,6 +297,21 @@ class HeatGeneration(BaseModel):
     cooling: list[HeatGenerationRow] | None = None
 
 
+class Boiler(BaseModel):
+    """The Boiler sheet's boiler, from its "Project data" column. Whether it is
+    in use is PER's call (heat_generation), not this read's."""
+
+    boiler_type: str | None = None
+    fuel: str | None = None
+    design_output: float | None = None
+    design_output_unit: str | None = None
+    indoor: bool | None = None
+    efficiency_30: float | None = None
+    efficiency_100: float | None = None
+    standby_loss_70: float | None = None
+    sources: dict[str, str] | None = None
+
+
 class ParseResponse(BaseModel):
     """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
     coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
@@ -312,6 +327,7 @@ class ParseResponse(BaseModel):
     project_info: ProjectInfo | None = None
     hvac_equipment: list[HvacEquipmentItem] | None = None
     heat_generation: HeatGeneration | None = None
+    boiler: Boiler | None = None
 
 
 class ParseAccepted(BaseModel):
