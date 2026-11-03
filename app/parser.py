@@ -18,6 +18,7 @@ from typing import Any
 from openpyxl import load_workbook
 from PHX.PHPP.phpp_localization import shape_model
 
+from app.boiler import read_boiler
 from app.envelope import read_envelope
 from app.equipment import read_equipment
 from app.heat_generation import read_heat_generation
@@ -71,6 +72,7 @@ def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
             "project_info": read_project_info(wb, shape),
             "hvac_equipment": read_equipment(wb, version),
             "heat_generation": read_heat_generation(wb, shape),
+            "boiler": read_boiler(wb, shape),
         }
     finally:
         wb.close()
