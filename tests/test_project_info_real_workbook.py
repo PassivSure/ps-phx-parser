@@ -107,3 +107,10 @@ def test_no_organization_name_is_numeric(case):
     _, info = case
     for org in info["organizations"]:
         assert not org["name"].replace(".", "").replace("-", "").isdigit()
+
+
+def test_dwelling_units(case):
+    """Every file here is a single-family house: the Verification sheet's
+    typed count is 1 on v9.7 and v10.6 alike."""
+    _, info = case
+    assert info["dwelling_units"] == 1

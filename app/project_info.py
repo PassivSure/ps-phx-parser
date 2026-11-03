@@ -7,6 +7,9 @@ sources because PHX's shape doesn't map all the fields ps-rails consumes:
     project_name     — OVERVIEW.basic_data.address_project_name (Overview!C11)
     occupancy_type   — VERIFICATION.phi_building_use_type
                         (locator R="Building use", value T at row+1)
+    dwelling_units   — VERIFICATION.num_of_units
+                        (locator E="No. of dwelling units:", value F). The
+                        typed input: Overview's count is a formula copying it.
 
   Direct cell reads (PHX gap):
     postal_code      — Verification!K7 (strip surrounding quotes)
@@ -86,6 +89,7 @@ def read_project_info(wb: Workbook, shape: shape_model.PhppShape) -> dict[str, A
         "postal_code": _postal_code(wb, shape),
         "location_string": _location_string(wb, shape),
         "occupancy_type": _occupancy_type(wb, shape),
+        "dwelling_units": _dwelling_units(wb, shape),
         "verification_complete": False,  # deferred — see module docstring
         "organizations": _organizations(wb, shape),
     }
@@ -181,11 +185,28 @@ def _occupancy_type(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
     """Look up phi_building_use_type via the PHX locator pattern. Returns
     the raw PHX-formatted string (e.g. ``"21-Non-res building: School ..."``);
     the Mapper does the human-friendly translation against OccupancyType."""
+    return _str(_located_value(wb, shape, shape.VERIFICATION.phi_building_use_type))
+
+
+def _dwelling_units(wb: Workbook, shape: shape_model.PhppShape) -> int | None:
+    """The Verification sheet's dwelling-unit count, as a whole number of at
+    least one. Anything else (blank, text, a fraction, zero) is None: ps-rails
+    picks single- or multifamily from it, so a doubtful count must not guess."""
+    value = _located_value(wb, shape, shape.VERIFICATION.num_of_units)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value < 1 or value != int(value):
+        return None
+    return int(value)
+
+
+def _located_value(wb: Workbook, shape: shape_model.PhppShape, item: Any) -> Any:
+    """The value a VERIFICATION locator item points at: the row whose
+    ``locator_col`` holds ``locator_string``, offset, in ``input_column``."""
     ws = _sheet(wb, shape.VERIFICATION.name)
     if ws is None:
         return None
 
-    item = shape.VERIFICATION.phi_building_use_type
     locator_col = column_index_from_string(item.locator_col)
     needle = item.locator_string.strip().lower()
 
@@ -194,7 +215,7 @@ def _occupancy_type(wb: Workbook, shape: shape_model.PhppShape) -> str | None:
         if isinstance(v, str) and v.strip().lower() == needle:
             target_row = r + item.input_row_offset
             target_col = column_index_from_string(item.input_column)
-            return _str(ws.cell(row=target_row, column=target_col).value)
+            return ws.cell(row=target_row, column=target_col).value
     return None
 
 

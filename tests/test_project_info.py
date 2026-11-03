@@ -50,6 +50,25 @@ def test_occupancy_type_via_phx_locator(workbook_bytes_with_project_info):
     assert info["occupancy_type"] == "10-Residential building: Residential"
 
 
+def test_dwelling_units_via_phx_locator(workbook_bytes_with_project_info):
+    """VERIFICATION.num_of_units: "No. of dwelling units:" in E, the count in F."""
+    info = _info(workbook_bytes_with_project_info)
+    assert info["dwelling_units"] == 42
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(2, 2), (2.0, 2), (1, 1), (0, None), (2.5, None), ("2", None), ("", None), (None, None)],
+)
+def test_dwelling_units_only_a_whole_count(shape_en_10_6ip, value, expected):
+    """A count picks single- or multifamily downstream, so only a whole
+    number of at least one is reported."""
+    from tests.conftest import build_workbook_bytes
+
+    info = _info(build_workbook_bytes(shape_en_10_6ip, num_of_units_value=value))
+    assert info["dwelling_units"] == expected
+
+
 def test_organizations_label_strips_role_suffix(workbook_bytes_with_project_info):
     """Overview labels look like 'Architect name / E-mail'. We keep the
     role prefix so the schema's `label` field carries something meaningful."""

@@ -254,6 +254,7 @@ class ProjectInfo(BaseModel):
     postal_code: str | None = None
     location_string: str | None = None
     occupancy_type: str | None = None
+    dwelling_units: int | None = None
     verification_complete: bool
     organizations: list[Organization]
 
