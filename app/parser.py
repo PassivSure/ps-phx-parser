@@ -20,6 +20,7 @@ from PHX.PHPP.phpp_localization import shape_model
 
 from app.envelope import read_envelope
 from app.equipment import read_equipment
+from app.heat_generation import read_heat_generation
 from app.kpis import read_kpis
 from app.project_info import read_project_info
 from app.shape_overrides import apply_overrides
@@ -69,6 +70,7 @@ def parse_workbook(workbook_bytes: bytes, version: str) -> dict[str, Any]:
             "envelope": read_envelope(wb, shape),
             "project_info": read_project_info(wb, shape),
             "hvac_equipment": read_equipment(wb, version),
+            "heat_generation": read_heat_generation(wb, shape),
         }
     finally:
         wb.close()

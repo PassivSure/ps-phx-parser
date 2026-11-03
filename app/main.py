@@ -280,6 +280,23 @@ class HvacEquipmentItem(BaseModel):
     source: str | None = None
 
 
+class HeatGenerationRow(BaseModel):
+    """One PER heat-generation row: its label and the final energy it supplies."""
+
+    label: str | None = None
+    final_energy: float | None = None
+    source: str | None = None
+
+
+class HeatGeneration(BaseModel):
+    """PER's heating, DHW and cooling source rows. A block is null when its
+    locators were not found (not read), [] when it holds no labelled rows."""
+
+    heating: list[HeatGenerationRow] | None = None
+    dhw: list[HeatGenerationRow] | None = None
+    cooling: list[HeatGenerationRow] | None = None
+
+
 class ParseResponse(BaseModel):
     """v1.0.0 envelope. Phase 2 fills in the optional subtrees as the
     coverage tickets ship (P2.2 kpis, P2.3 envelope, P2.4 hvac, P2.5 project).
@@ -294,6 +311,7 @@ class ParseResponse(BaseModel):
     envelope: Envelope | None = None
     project_info: ProjectInfo | None = None
     hvac_equipment: list[HvacEquipmentItem] | None = None
+    heat_generation: HeatGeneration | None = None
 
 
 class ParseAccepted(BaseModel):
