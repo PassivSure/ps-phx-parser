@@ -330,6 +330,14 @@ class ParseResponse(BaseModel):
     boiler: Boiler | None = None
 
 
+# Every subtree the response carries. The job passes each one from the parse
+# result by this list, so a subtree added to ParseResponse reaches the caller
+# without a second edit here (heat_generation and boiler were dropped that way).
+RESULT_SUBTREES = tuple(
+    n for n in ParseResponse.model_fields if n not in ("schema_version", "parser")
+)
+
+
 class ParseAccepted(BaseModel):
     """202 body. The parse takes ~46s against a 30s router cap, so /parse hands
     back a job id immediately and the caller polls /parse/{job_id}."""
@@ -494,10 +502,7 @@ def _run_parse(job_id: str, url: str, version_hint: str | None) -> None:
                 phpp_version=version,
                 parsed_at=datetime.now(UTC).isoformat(),
             ),
-            kpis=result.get("kpis"),
-            envelope=result.get("envelope"),
-            project_info=result.get("project_info"),
-            hvac_equipment=result.get("hvac_equipment"),
+            **{name: result.get(name) for name in RESULT_SUBTREES},
         ).model_dump(),
     )
 

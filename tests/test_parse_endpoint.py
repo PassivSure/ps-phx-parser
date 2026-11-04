@@ -155,3 +155,53 @@ def test_service_stays_responsive_while_a_parse_runs(monkeypatch, workbook_bytes
     assert health.status_code == 200
     assert elapsed < 0.5, f"event loop blocked: /health took {elapsed:.2f}s"
     assert client.get(f"/parse/{job_id}").json()["status"] == "pending"
+
+
+HEAT_GENERATION = {
+    "heating": [
+        {"label": "Boiler Condensing Natural gas", "final_energy": 1.788, "source": "PER!T23"}
+    ],
+    "dhw": [
+        {"label": "Boiler Condensing Natural gas", "final_energy": 1.087, "source": "PER!T45"},
+        {"label": "Solar thermal system", "final_energy": 1.129, "source": "PER!T48"},
+    ],
+    "cooling": [],
+}
+BOILER = {
+    "boiler_type": "10-Improved condensing gas boiler",
+    "fuel": "30-Natural gas",
+    "design_output": 40.0,
+    "design_output_unit": "kBTU/hr",
+    "indoor": True,
+    "efficiency_30": 0.97,
+    "efficiency_100": 0.93,
+    "standby_loss_70": 0.012,
+    "sources": {"boiler_type": "Boiler!N21"},
+}
+
+
+@respx.mock
+def test_parse_job_carries_heat_generation_and_boiler(workbook_bytes, monkeypatch):
+    """The job built its response from a hand-kept list of subtrees, which left
+    out heat_generation and boiler: ps-rails then sent every equipment pass to
+    Claude. Every subtree parse_workbook returns must reach the caller."""
+    respx.get(WORKBOOK_URL).mock(
+        return_value=httpx.Response(200, content=workbook_bytes)
+    )
+    monkeypatch.setattr(
+        "app.main.parse_workbook",
+        lambda body, version: {"heat_generation": HEAT_GENERATION, "boiler": BOILER},
+    )
+
+    settled = poll_until_settled(start_parse(phpp_version="EN_10_6IP"))
+    assert settled["status"] == "done", settled.get("detail")
+    assert settled["result"]["heat_generation"] == HEAT_GENERATION
+    assert settled["result"]["boiler"] == BOILER
+
+
+def test_every_parsed_subtree_is_in_the_response(workbook_bytes):
+    from app.main import RESULT_SUBTREES
+    from app.parser import parse_workbook
+
+    assert set(parse_workbook(workbook_bytes, "EN_10_6IP")) <= set(RESULT_SUBTREES)
+    assert {"heat_generation", "boiler"} <= set(RESULT_SUBTREES)
