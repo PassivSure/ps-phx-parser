@@ -20,6 +20,7 @@ from typing import Any
 from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
+from app.easyph import read_easyph
 from app.named_ranges import resolve, sheet_of
 
 logger = logging.getLogger(__name__)
@@ -198,12 +199,61 @@ def read_equipment(wb: Workbook, version: str) -> list[dict[str, Any]]:
         items.extend(_ventilation(wb))
         items.extend(_cooling(wb))
         items.extend(_heat_pumps(wb))
+        items = _resolve_easyph(wb, items)
         if any(item["equipment_type"] is None for item in items):
             raise ValueError("an emitted item is missing its required equipment_type")
     except Exception:
         logger.exception("[equipment] read_equipment failed; degrading to []")
         return []
     return items
+
+
+# easyPH's simplified form fills the HP and cooling selections with these
+# names; the unit itself is on the easyPH tab (app.easyph).
+_EASYPH_PLACEHOLDER = re.compile(r"^easyPH\b", re.IGNORECASE)
+_EASYPH_BLOCKS = {"heat_pump": "heating", "cooling_unit": "cooling", "dhw_heat_pump": "dhw"}
+
+
+def _resolve_easyph(wb: Workbook, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each easyPH placeholder becomes the unit typed on the simplified form,
+    or is dropped: a placeholder is never emitted. Its source is the form's
+    cell, not the selection's, so ps-rails' overlay (which keys on the
+    selection cells) leaves it alone."""
+    if not any(_EASYPH_PLACEHOLDER.match(item.get("name") or "") for item in items):
+        return items
+    forms = read_easyph(wb) or {}
+    out = []
+    for item in items:
+        if not _EASYPH_PLACEHOLDER.match(item.get("name") or ""):
+            out.append(item)
+            continue
+        block = forms.get(_EASYPH_BLOCKS.get(item["equipment_type"], ""), {})
+        unit = block.get("unit") if block.get("form") == "simplified" else None
+        if unit and unit.get("product"):
+            out.append(_easyph_item(item["equipment_type"], unit))
+    return out
+
+
+def _easyph_item(equipment_type: str, unit: dict[str, Any]) -> dict[str, Any]:
+    power, power_unit = unit.get("nominal_power"), (unit.get("nominal_power_unit") or "").lower()
+    capacity = capacity_unit = None
+    if power is not None and power > 0:
+        if power_unit == "kw":
+            capacity, capacity_unit = power, "kW"
+        elif power_unit in ("kbtu/hr", "kbtu/h"):
+            capacity, capacity_unit = round(power * 1000, 1), "Btu/h"
+    has_rating = unit.get("efficiency_value") is not None and unit.get("efficiency_metric")
+    sources = unit.get("sources", {})
+    return _item(
+        equipment_type=equipment_type,
+        name=unit["product"],
+        manufacturer=unit.get("manufacturer"),
+        capacity=capacity,
+        capacity_unit=capacity_unit,
+        efficiency_value=unit["efficiency_value"] if has_rating else None,
+        efficiency_type=unit["efficiency_metric"] if has_rating else None,
+        source=f"{sources.get('product')}; easyPH simplified form",
+    )
 
 
 _NO_SPEC_VALUES_NOTE = "; no heat/humidity recovery values found on the Components sheet"
