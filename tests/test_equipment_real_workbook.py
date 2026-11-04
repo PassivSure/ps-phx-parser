@@ -129,9 +129,9 @@ HEAT_PUMPS = {
         ("dhw_heat_pump", "Standard air/water heat pump"): (5.0, 4.3),
     }),
     "holmes_si": ("2536 Holmes_easyPH_260512.xlsx", "EN_10_6", {
-        # Its heating is a combined ventilation unit (93ud): HP!AF66 / AG66,
-        # test point 1's maximum, the largest of its ten points.
-        ("heat_pump", "easyPH heating"): (13.07, 3.91),
+        # Its heating is on easyPH's simplified form (easyPH!Q234, S239: HSPF2,
+        # not a COP), which PHPP copies to a combined unit named "easyPH heating".
+        ("heat_pump", "27VNA324A*030*"): (7.39, 10.5),
         ("dhw_heat_pump", "HPWH"): (1.6, 2.84),
     }),
 }
@@ -154,4 +154,6 @@ def test_heat_pump_capacity_and_cop(heat_pump_case):
     for key, (capacity, cop) in expected.items():
         assert got[key][0] == pytest.approx(capacity, abs=0.01), key
         assert got[key][1] == pytest.approx(cop, abs=0.01), key
-    assert all(i["capacity_unit"] == "kW" and i["efficiency_type"] == "COP" for i in items)
+    assert all(i["capacity_unit"] == "kW" for i in items)
+    tested = [i for i in items if not i["source"].startswith("easyPH!")]
+    assert all(i["efficiency_type"] == "COP" for i in tested)

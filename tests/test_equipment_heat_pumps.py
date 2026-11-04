@@ -170,10 +170,10 @@ COMBINED_SELECTION = "WP_Heizungssystem_Auswahl_Lueftung"
 class TestCombinedVentilationUnit:
     def test_reads_the_largest_capacity_of_its_ten_points_and_the_cop_there(self):
         wb = _hp_wb(sheet="HP",
-                    values={"WP_Kombi_ankreuzen": "x", COMBINED_SELECTION: "93ud-easyPH heating"},
+                    values={"WP_Kombi_ankreuzen": "x", COMBINED_SELECTION: "93ud-Combined unit"},
                     tables={"combined": COMBINED})
         [hp] = _of(read_equipment(wb, "EN_10_6"), "heat_pump")
-        assert hp["name"] == "easyPH heating"
+        assert hp["name"] == "Combined unit"
         assert (hp["capacity"], hp["efficiency_value"]) == (13.0727, 3.9081)
         assert hp["source"].startswith("WP_Heizungssystem_Auswahl_Lueftung; test point 1")
 
