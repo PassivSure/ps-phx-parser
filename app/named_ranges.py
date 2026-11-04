@@ -102,3 +102,21 @@ def sheet_of(wb: Workbook, name: str) -> str | None:
     if match is None or match.group(1) not in wb.sheetnames:
         return None
     return match.group(1)
+
+
+def cells_of(wb: Workbook, name: str) -> tuple[str, str, str] | None:
+    """(sheet, first cell, last cell) of a defined name, or None.
+
+    For a caller that must keep a range's empty cells in place -- resolve()
+    drops them, which shifts every value after a blank in a table read as a
+    flat list. A single-cell name gives the same cell twice.
+    """
+    defined = wb.defined_names.get(name)
+    if defined is None:
+        return None
+    match = _REF.match(str(defined.value).strip())
+    if match is None or match.group(1) not in wb.sheetnames:
+        return None
+    sheet_name, first, last = match.groups()
+    first = first.replace("$", "")
+    return sheet_name, first, (last or first).replace("$", "")

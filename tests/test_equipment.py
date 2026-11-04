@@ -69,9 +69,9 @@ class TestVentilationClassification:
 
 
 class TestDiscovery:
-    def test_emits_nothing_for_a_non_v106_version(self):
+    def test_emits_nothing_for_an_unsupported_version(self):
         wb = _wb({"Lueftung_Auswahl_Lueftungsgeraet": "01ud-Unit"})
-        assert read_equipment(wb, "EN_9_7IP") == []
+        assert read_equipment(wb, "EN_9_6A") == []
 
     def test_emits_no_ventilation_device_when_none_is_selected(self):
         # The phantom-device guard: a file has a row per family whether or not

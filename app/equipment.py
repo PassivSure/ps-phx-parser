@@ -8,7 +8,8 @@ not a convention.
 Scope is PHPP v10.6. The names are stable across the IP and SI editions of a
 version -- verified on two real workbooks -- but NOT across versions: v9.7
 carries 91 WP_ ranges against v10.6's 43 with no overlap. Other versions
-therefore emit nothing rather than guessing.
+therefore emit nothing rather than guessing, except 9.7 IP, which
+app.equipment_v97 reads by its own names.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 
 from app.easyph import read_easyph
+from app.equipment_v97 import read_equipment_v97
 from app.named_ranges import resolve, sheet_of
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 # The v10.6 shapes this module understands. A version outside this set emits
 # nothing -- see the module docstring on why names do not generalise.
 SUPPORTED_VERSIONS = ("EN_10_6", "EN_10_6IP")
+# 9.7 IP names its equipment differently; app.equipment_v97 reads it.
+V97 = "EN_9_7IP"
 
 M3H_TO_CFM = 0.588578
 
@@ -191,20 +195,26 @@ def read_equipment(wb: Workbook, version: str) -> list[dict[str, Any]]:
     app.main._run_parse and fail the whole job, so it is degraded here
     before it can leave this function.
     """
-    if version not in SUPPORTED_VERSIONS:
+    if version not in SUPPORTED_VERSIONS and version != V97:
         return []
 
     try:
+        if version == V97:
+            return _checked(read_equipment_v97(wb))
         items: list[dict[str, Any]] = []
         items.extend(_ventilation(wb))
         items.extend(_cooling(wb))
         items.extend(_heat_pumps(wb))
-        items = _resolve_easyph(wb, items)
-        if any(item["equipment_type"] is None for item in items):
-            raise ValueError("an emitted item is missing its required equipment_type")
+        items = _checked(_resolve_easyph(wb, items))
     except Exception:
         logger.exception("[equipment] read_equipment failed; degrading to []")
         return []
+    return items
+
+
+def _checked(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if any(item["equipment_type"] is None for item in items):
+        raise ValueError("an emitted item is missing its required equipment_type")
     return items
 
 
