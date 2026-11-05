@@ -71,7 +71,7 @@ class TestVentilationClassification:
 class TestDiscovery:
     def test_emits_nothing_for_an_unsupported_version(self):
         wb = _wb({"Lueftung_Auswahl_Lueftungsgeraet": "01ud-Unit"})
-        assert read_equipment(wb, "EN_9_7IP") == []
+        assert read_equipment(wb, "EN_9_6A") == []
         assert read_equipment(wb, "EN_10_4A") == []
 
     def test_reads_10_4_ip(self):
