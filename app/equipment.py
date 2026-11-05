@@ -5,11 +5,13 @@ declares -- ParseResponse's docstring names this slot "P2.4 hvac". The schema
 is strict (additionalProperties: false), so the key set in _item() is the contract,
 not a convention.
 
-Scope is PHPP v10.6. The names are stable across the IP and SI editions of a
-version -- verified on two real workbooks -- but NOT across versions: v9.7
-carries 91 WP_ ranges against v10.6's 43 with no overlap. Other versions
-therefore emit nothing rather than guessing, except 9.7 IP, which
-app.equipment_v97 reads by its own names.
+Scope is PHPP v10.6 and v10.4 IP. The names are stable across the IP and SI
+editions of a version -- verified on two real workbooks -- and 10.4 IP carries
+every name and test-point table this module reads at the same place (one real
+workbook, 370 W). They are NOT stable across major versions: v9.7 carries 91
+WP_ ranges against v10.6's 43 with no overlap. Other versions therefore emit
+nothing rather than guessing, except 9.7 IP, which app.equipment_v97 reads by
+its own names.
 """
 
 from __future__ import annotations
@@ -27,9 +29,10 @@ from app.named_ranges import resolve, sheet_of
 
 logger = logging.getLogger(__name__)
 
-# The v10.6 shapes this module understands. A version outside this set emits
-# nothing -- see the module docstring on why names do not generalise.
-SUPPORTED_VERSIONS = ("EN_10_6", "EN_10_6IP")
+# The shapes this module understands, each checked on a real workbook. A
+# version outside this set emits nothing -- see the module docstring on why
+# names do not generalise.
+SUPPORTED_VERSIONS = ("EN_10_6", "EN_10_6IP", "EN_10_4IP")
 # 9.7 IP names its equipment differently; app.equipment_v97 reads it.
 V97 = "EN_9_7IP"
 
