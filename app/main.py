@@ -281,11 +281,17 @@ class HvacEquipmentItem(BaseModel):
 
 
 class HeatGenerationRow(BaseModel):
-    """One PER heat-generation row: its label and the final energy it supplies."""
+    """One PER heat-generation row: its label, the final energy it supplies,
+    and its efficiency in W/W as PHPP calculated it and as the team typed it
+    (PHPP uses the typed one when it holds a number)."""
 
     label: str | None = None
     final_energy: float | None = None
     source: str | None = None
+    calculated_efficiency: float | None = None
+    user_efficiency: float | None = None
+    calculated_efficiency_source: str | None = None
+    user_efficiency_source: str | None = None
 
 
 class HeatGeneration(BaseModel):
