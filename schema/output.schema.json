@@ -188,7 +188,11 @@
         "properties": {
           "label": { "type": ["string", "null"] },
           "final_energy": { "type": ["number", "null"] },
-          "source": { "type": ["string", "null"] }
+          "source": { "type": ["string", "null"] },
+          "calculated_efficiency": { "type": ["number", "null"], "description": "PHPP's calculated efficiency for the row, W/W." },
+          "user_efficiency": { "type": ["number", "null"], "description": "The efficiency the team typed ('User defined' / 'Manual value'), W/W; PHPP uses it when present." },
+          "calculated_efficiency_source": { "type": ["string", "null"] },
+          "user_efficiency_source": { "type": ["string", "null"] }
         }
       }
     },
