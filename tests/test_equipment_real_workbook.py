@@ -1,4 +1,4 @@
-"""Ground truth from three real v10.6 workbooks.
+"""Ground truth from real v10.6 workbooks and one v10.4 IP workbook (370 W).
 
 Skipped when the files are absent, like the other real-workbook suites. Three
 files, not one -- and they exercise different lookup paths, which a smaller
@@ -36,6 +36,15 @@ CASES = {
         "heat_recovery_pct": 84.0,
         "airflow_m3h": 319.412,
         "airflow_cfm": 188.00,
+    },
+    "370_w_10_4_ip": {
+        "file": "260306 370 w new R-values.xlsx",
+        "version": "EN_10_4IP",
+        "vent_name": "Brink Climate Systems B.V. - Brink Flair 325 Enthalpie",
+        "vent_type": "erv",
+        "heat_recovery_pct": 86.0,
+        "airflow_m3h": 313.046,
+        "airflow_cfm": 184.25,
     },
     "easyph_hrv": {
         "file": "PHPP_EN_V10.6_easyPH_Example.xlsx",
@@ -123,6 +132,12 @@ HEAT_PUMPS = {
         # Its water-based unit is selected but not ticked, and its table is
         # filled in anyway: not emitted.
         ("heat_pump", "Minisplit classroom"): (1.08, 4.56),
+    }),
+    "370_w_10_4_ip": ("260306 370 w new R-values.xlsx", "EN_10_4IP", {
+        # The file's own figures: its Midea's test points carry COPs of
+        # 0.38-0.73, and PHPP calculates with them as typed.
+        ("heat_pump", "Midea MAX 9k 40 SEER"): (4.36, 0.72),
+        ("dhw_heat_pump", "Standard DHW HP"): (7.99, 3.0),
     }),
     "easyph_example": ("PHPP_EN_V10.6_easyPH_Example.xlsx", "EN_10_6", {
         ("heat_pump", "Standard air/water heat pump"): (5.0, 4.3),
