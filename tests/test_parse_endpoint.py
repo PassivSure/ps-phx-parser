@@ -157,13 +157,24 @@ def test_service_stays_responsive_while_a_parse_runs(monkeypatch, workbook_bytes
     assert client.get(f"/parse/{job_id}").json()["status"] == "pending"
 
 
+def _per_row(label, energy, row, calculated=None, user=None):
+    return {
+        "label": label,
+        "final_energy": energy,
+        "source": f"PER!T{row}",
+        "calculated_efficiency": calculated,
+        "user_efficiency": user,
+        "calculated_efficiency_source": f"PER!Q{row}",
+        "user_efficiency_source": f"PER!R{row}",
+    }
+
+
 HEAT_GENERATION = {
-    "heating": [
-        {"label": "Boiler Condensing Natural gas", "final_energy": 1.788, "source": "PER!T23"}
-    ],
+    "heating": [_per_row("Boiler Condensing Natural gas", 1.788, 23, calculated=0.95)],
     "dhw": [
-        {"label": "Boiler Condensing Natural gas", "final_energy": 1.087, "source": "PER!T45"},
-        {"label": "Solar thermal system", "final_energy": 1.129, "source": "PER!T48"},
+        _per_row("Boiler Condensing Natural gas", 1.087, 45, calculated=0.95),
+        _per_row("Solar thermal system", 1.129, 48),
+        _per_row("Electricity (direct)", 0.3, 44, calculated=1.0, user=2.84),
     ],
     "cooling": [],
 }

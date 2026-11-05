@@ -84,6 +84,8 @@ def test_reads_each_block_between_its_locators():
     }
 
 
+BTU_PER_W = 3.412141156488376
+
 DHW_DIRECT = {
     "dhw": [
         ("Electricity (HP compact unit)", None),
@@ -102,7 +104,7 @@ def test_ip_efficiencies_are_converted_to_w_per_w():
     wb = _per_workbook(
         shape,
         DHW_DIRECT,
-        efficiencies={("dhw", "Electricity (direct)"): (3.412141156488376, 2.84 * 3.412141156488376)},
+        efficiencies={("dhw", "Electricity (direct)"): (BTU_PER_W, 2.84 * BTU_PER_W)},
     )
     row = read_heat_generation(wb, shape)["dhw"][2]
     assert row["label"] == "Electricity (direct)"
